@@ -1,0 +1,87 @@
+body {
+    margin: 0;
+    overflow: hidden;
+}
+
+#game-container {
+    position: relative;
+}
+
+#game-canvas {
+    width: 100vw;
+    height: 100vh;
+}
+
+#hud {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    border-radius: 5px;
+}
+
+#feedback {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    background: rgba(0, 0, 0, 0.8);
+    padding: 10px;
+    border-radius: 5px;
+}
+
+#inventory, #crafting, #quests {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    max-width: 600px;
+    width: 80%;
+}
+
+#inventory-items, #crafting-recipes, #quest-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.item, .recipe, .quest {
+    background: #333;
+    padding: 10px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.recipe.available {
+    background: #0a0;
+}
+
+.recipe.unavailable {
+    background: #a00;
+}
+
+#loading {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 24px;
+    text-align: center;
+}
+
+.stats {
+    position: fixed;
+    top: 0;
+    right: 0;
+    color: white;
+    background: rgba(0,0,0,0.5);
+    padding: 10px;
+}
