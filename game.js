@@ -2,7 +2,9 @@ import * as THREE from 'https://cdn.skypack.dev/three@0.128.0';
 import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
 import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
 import { createNoise2D } from "https://cdn.skypack.dev/simplex-noise@4.0.1";
+
 const noise2D = createNoise2D();
+const biomeNoise2D = createNoise2D();
 
 // ### Game Constants
 const PLAYER_SPEED = 10.0;
@@ -14,7 +16,7 @@ const DAY_LENGTH = 1200;
 const NIGHT_LENGTH = 60;
 const TOTAL_CYCLE_TIME = DAY_LENGTH + NIGHT_LENGTH;
 const TERRAIN_SIZE = 500;
-const TERRAIN_SEGMENTS = 50;
+const TERRAIN_SEGMENTS = 200; // Increased terrain segments for smoother terrain
 const ELEMENT_SIZE = TERRAIN_SIZE / TERRAIN_SEGMENTS;
 const PLAYER_MAX_SPEED = 10;
 const PLAYER_MAX_RUN_SPEED = 20;
@@ -52,16 +54,21 @@ const weaponStats = {
 
 // ### Height Functions with Simplex Noise
 function getHeight(x, z) {
-    const scale = 0.02; // Controls feature size
+    const biomeScale = 0.005;
+    const biomeValue = (biomeNoise2D(x * biomeScale, z * biomeScale) + 1) / 2;
+
+    const minAmplitude = 5;
+    const maxAmplitude = 40;
+    const amplitude = minAmplitude + (maxAmplitude - minAmplitude) * biomeValue;
+
+    const scale = 0.02;
     const xScaled = x * scale;
     const zScaled = z * scale;
 
-    // Layered noise for natural terrain
-    const baseHeight = noise2D(xScaled, zScaled) * 20; // Large hills
-    const detail = noise2D(xScaled * 4, zScaled * 4) * 2; // Medium bumps
-    const fineDetail = noise2D(xScaled * 10, zScaled * 10) * 5.5; // Small details
+    const baseHeight = noise2D(xScaled, zScaled) * amplitude;
+    const detail = noise2D(xScaled * 4, zScaled * 4) * 2;
+    const fineDetail = noise2D(xScaled * 10, zScaled * 10) * 0.5;
 
-    // Combine layers and ensure positive height
     let height = baseHeight + detail + fineDetail;
     height = Math.max(0, height);
     return height;
@@ -170,6 +177,40 @@ for (let z = 0; z <= TERRAIN_SEGMENTS; z++) {
     }
     heightData.push(row);
 }
+
+// ### Terrain Flattening Function
+function flattenTerrainArea(centerX, centerZ, width, depth, targetHeight) {
+    const startX = centerX - width / 2;
+    const endX = centerX + width / 2;
+    const startZ = centerZ - depth / 2;
+    const endZ = centerZ + depth / 2;
+
+    for (let z = 0; z <= TERRAIN_SEGMENTS; z++) {
+        for (let x = 0; x <= TERRAIN_SEGMENTS; x++) {
+            const xPos = x * ELEMENT_SIZE - TERRAIN_SIZE / 2;
+            const zPos = z * ELEMENT_SIZE - TERRAIN_SIZE / 2;
+
+            if (xPos >= startX && xPos <= endX && zPos >= startZ && zPos <= endZ) {
+                heightData[z][x] = targetHeight;
+            }
+        }
+    }
+}
+
+function updateTerrainMesh() {
+    const vertices = terrainGeometry.attributes.position.array;
+    for (let z = 0; z <= TERRAIN_SEGMENTS; z++) {
+        for (let x = 0; x <= TERRAIN_SEGMENTS; x++) {
+            const index = (z * (TERRAIN_SEGMENTS + 1) + x) * 3;
+            const xPos = (x * ELEMENT_SIZE) - TERRAIN_SIZE / 2;
+            const zPos = -((z * ELEMENT_SIZE) - TERRAIN_SIZE / 2); // Note the negation for zPos to align with terrainMesh orientation
+            vertices[index + 2] = heightData[z][x]; // Use heightData to set vertex height
+        }
+    }
+    terrainGeometry.attributes.position.needsUpdate = true;
+    terrainGeometry.computeVertexNormals();
+}
+
 
 const heightfieldShape = new CANNON.Heightfield(heightData, { elementSize: ELEMENT_SIZE });
 const physicsMaterial = new CANNON.Material();
@@ -1436,7 +1477,7 @@ function pulseScreenRed() {
             setTimeout(() => {
                 overlay.style.opacity = 0;
                 isPulsingRed = false;
-            }, 200); // Duration of the pulse effect
+            }, 200);
         }
     }
 }
@@ -1616,102 +1657,252 @@ function spawnTrees() {
 }
 
 // ### Buildings and Structures
-function createBuilding(x, z) {
-    const buildingHeight = 32 + Math.random() * 32; // Increased size for bigger houses
-    const buildingWidth = 24 + Math.random() * 24;  // Increased size for bigger houses
-    const buildingDepth = 24 + Math.random() * 24;  // Increased size for bigger houses
+function createBuilding(x, z, width, depth, height) {
+    // Create a group to hold all building parts
+    const buildingGroup = new THREE.Group();
+    const y = getTerrainHeight(x, z) + height / 2;
+    buildingGroup.position.set(x, y, z);
 
-    const geometry = new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth);
-    const material = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
-    const building = new THREE.Mesh(geometry, material);
+    // Wall material (visible from both sides)
+    const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513, side: THREE.DoubleSide });
+    const wallThickness = 1;
 
-    const y = getTerrainHeight(x, z) + buildingHeight / 2;
-    building.position.set(x, y, z);
-    building.castShadow = true;
-    building.receiveShadow = true;
+    // Left wall
+    const leftWall = new THREE.Mesh(
+        new THREE.BoxGeometry(wallThickness, height, depth),
+        wallMaterial
+    );
+    leftWall.position.set(-width / 2 + wallThickness / 2, 0, 0);
+    leftWall.castShadow = true;
+    leftWall.receiveShadow = true;
+    buildingGroup.add(leftWall);
 
-    const roofHeight = 4 + Math.random() * 5;
-    const roofGeometry = new THREE.ConeGeometry(buildingWidth * 0.8, roofHeight, 4);
-    const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x708090 });
-    const roof = new THREE.Mesh(roofGeometry, roofMaterial);
-    roof.position.set(0, buildingHeight / 2 + roofHeight / 2 - 0.5, 0);
-    roof.castShadow = true;
-    roof.receiveShadow = true;
-    building.add(roof);
+    // Right wall
+    const rightWall = new THREE.Mesh(
+        new THREE.BoxGeometry(wallThickness, height, depth),
+        wallMaterial
+    );
+    rightWall.position.set(width / 2 - wallThickness / 2, 0, 0);
+    rightWall.castShadow = true;
+    rightWall.receiveShadow = true;
+    buildingGroup.add(rightWall);
 
-    const doorWidth = 2.5;
-    const doorHeight = 5;
-    const doorDepth = 0.2;
+    // Back wall
+    const backWall = new THREE.Mesh(
+        new THREE.BoxGeometry(width, height, wallThickness),
+        wallMaterial
+    );
+    backWall.position.set(0, 0, -depth / 2 + wallThickness / 2);
+    backWall.castShadow = true;
+    backWall.receiveShadow = true;
+    buildingGroup.add(backWall);
+
+    // Front left wall
+    const doorWidth = 6;
+    const frontLeftWidth = (width - doorWidth) / 2;
+    const frontLeftWall = new THREE.Mesh(
+        new THREE.BoxGeometry(frontLeftWidth, height, wallThickness),
+        wallMaterial
+    );
+    frontLeftWall.position.set(-width / 2 + frontLeftWidth / 2, 0, depth / 2 - wallThickness / 2);
+    frontLeftWall.castShadow = true;
+    frontLeftWall.receiveShadow = true;
+    buildingGroup.add(frontLeftWall);
+
+    // Front right wall
+    const frontRightWall = new THREE.Mesh(
+        new THREE.BoxGeometry(frontLeftWidth, height, wallThickness),
+        wallMaterial
+    );
+    frontRightWall.position.set(width / 2 - frontLeftWidth / 2, 0, depth / 2 - wallThickness / 2);
+    frontRightWall.castShadow = true;
+    frontRightWall.receiveShadow = true;
+    buildingGroup.add(frontRightWall);
+
+    // Door
+    const doorHeight = 8;
+    const doorDepth = 0.4;
     const doorGeometry = new THREE.BoxGeometry(doorWidth, doorHeight, doorDepth);
     const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x4b3621 });
     const door = new THREE.Mesh(doorGeometry, doorMaterial);
-    door.position.set(0, -buildingHeight / 2 + doorHeight / 2, buildingDepth / 2 + doorDepth / 2 + 0.01);
     door.castShadow = true;
-    building.add(door);
+
+    // Door pivot for swinging
+    const doorPivot = new THREE.Object3D();
+    const hingeX = -doorWidth / 2;
+    const hingeY = -height / 2 + doorHeight / 2;
+    const hingeZ = depth / 2 - wallThickness / 2; // Align with front wall plane
+    doorPivot.position.set(hingeX, hingeY, hingeZ);
+    buildingGroup.add(doorPivot);
+    door.position.set(doorWidth / 2, 0, 0); // Relative to pivot, centered in gap
+    doorPivot.add(door);
+    buildingGroup.doorPivot = doorPivot;
+    buildingGroup.door = door;
     door.userData.isDoor = true;
     door.userData.isOpen = false;
-    door.rotation.y = 0;
 
+    // Half wall above the door
+    const halfWallHeight = height - doorHeight - 0.5;
+    const halfWallGeometry = new THREE.BoxGeometry(doorWidth, halfWallHeight, wallThickness);
+    const halfWall = new THREE.Mesh(halfWallGeometry, wallMaterial);
+    halfWall.position.set(0, -height / 2 + doorHeight + halfWallHeight / 2, depth / 2 - wallThickness / 2);
+    halfWall.castShadow = true;
+    halfWall.receiveShadow = true;
+    buildingGroup.add(halfWall);
+
+    // Windows
     const windowWidth = 2;
     const windowHeight = 2.5;
     const windowGeometry = new THREE.BoxGeometry(windowWidth, windowHeight, 0.2);
     const windowMaterial = new THREE.MeshStandardMaterial({ color: 0xADD8E6, transparent: true, opacity: 0.7 });
+    const windowOffsetZ = depth / 2 - wallThickness / 2 + 0.01;
+    const windowOffsetY = height / 4;
 
-    const windowOffsetX = buildingWidth / 4;
-    const windowOffsetY = buildingHeight / 4;
-    const windowOffsetZ = buildingDepth / 2 + 0.01;
+    // Ensure windows fit within front wall segments
+    const maxWindowOffsetX = frontLeftWidth - windowWidth / 2 - 1; // 1 unit buffer
+    const windowOffsetX = Math.min(width / 4, maxWindowOffsetX);
 
     const window1 = new THREE.Mesh(windowGeometry, windowMaterial);
-    window1.position.set(windowOffsetX, -windowOffsetY, windowOffsetZ);
+    window1.position.set(-windowOffsetX, -windowOffsetY, windowOffsetZ);
     window1.castShadow = true;
-    building.add(window1);
+    buildingGroup.add(window1);
 
     const window2 = new THREE.Mesh(windowGeometry, windowMaterial);
-    window2.position.set(-windowOffsetX, -windowOffsetY, windowOffsetZ);
+    window2.position.set(windowOffsetX, -windowOffsetY, windowOffsetZ);
     window2.castShadow = true;
-    building.add(window2);
+    buildingGroup.add(window2);
 
     const window3 = new THREE.Mesh(windowGeometry, windowMaterial);
-    window3.position.set(windowOffsetX, windowOffsetY, windowOffsetZ);
+    window3.position.set(-windowOffsetX, windowOffsetY, windowOffsetZ);
     window3.castShadow = true;
-    building.add(window3);
+    buildingGroup.add(window3);
 
     const window4 = new THREE.Mesh(windowGeometry, windowMaterial);
-    window4.position.set(-windowOffsetX, windowOffsetY, windowOffsetZ);
+    window4.position.set(windowOffsetX, windowOffsetY, windowOffsetZ);
     window4.castShadow = true;
-    building.add(window4);
+    buildingGroup.add(window4);
 
-    const buildingShape = new CANNON.Box(new CANNON.Vec3(buildingWidth / 2, buildingHeight / 2, buildingDepth / 2));
+    // Roof
+    const roofHeight = 4 + Math.random() * 5;
+    const roofGeometry = new THREE.ConeGeometry(width * 0.8, roofHeight, 4);
+    const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x708090 });
+    const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+    roof.position.set(0, height / 2 + roofHeight / 2 - 0.5, 0);
+    roof.rotation.y = -Math.PI / 4;
+    roof.castShadow = true;
+    roof.receiveShadow = true;
+    buildingGroup.add(roof);
+
+    // Physics for building walls
     const buildingBody = new CANNON.Body({ mass: 0, material: physicsMaterial });
-    buildingBody.addShape(buildingShape);
+
+    // Left wall
+    const leftWallShape = new CANNON.Box(new CANNON.Vec3(wallThickness / 2, height / 2, depth / 2));
+    buildingBody.addShape(leftWallShape, new CANNON.Vec3(-width / 2 + wallThickness / 2, 0, 0));
+
+    // Right wall
+    const rightWallShape = new CANNON.Box(new CANNON.Vec3(wallThickness / 2, height / 2, depth / 2));
+    buildingBody.addShape(rightWallShape, new CANNON.Vec3(width / 2 - wallThickness / 2, 0, 0));
+
+    // Back wall
+    const backWallShape = new CANNON.Box(new CANNON.Vec3(width / 2, height / 2, wallThickness / 2));
+    buildingBody.addShape(backWallShape, new CANNON.Vec3(0, 0, -depth / 2 + wallThickness / 2));
+
+    // Front wall left
+    const frontLeftShape = new CANNON.Box(new CANNON.Vec3(frontLeftWidth / 2, height / 2, wallThickness / 2));
+    buildingBody.addShape(frontLeftShape, new CANNON.Vec3(-width / 2 + frontLeftWidth / 2, 0, depth / 2 - wallThickness / 2));
+
+    // Front wall right
+    const frontRightShape = new CANNON.Box(new CANNON.Vec3(frontLeftWidth / 2, height / 2, wallThickness / 2));
+    buildingBody.addShape(frontRightShape, new CANNON.Vec3(width / 2 - frontLeftWidth / 2, 0, depth / 2 - wallThickness / 2));
+
+    // Half wall above door
+    const halfWallShape = new CANNON.Box(new CANNON.Vec3(doorWidth / 2, halfWallHeight / 2, wallThickness / 2));
+    buildingBody.addShape(halfWallShape, new CANNON.Vec3(0, -height / 2 + doorHeight + halfWallHeight / 2, depth / 2 - wallThickness / 2));
+
     buildingBody.position.set(x, y, z);
     buildingBody.collisionFilterGroup = 8;
     buildingBody.collisionFilterMask = 1 | 2 | 4;
     world.addBody(buildingBody);
 
-    scene.add(building);
+    // Door physics body
+    const doorShape = new CANNON.Box(new CANNON.Vec3(doorWidth / 2, doorHeight / 2, doorDepth / 2));
+    const doorBody = new CANNON.Body({ mass: 0, material: physicsMaterial });
+    doorBody.addShape(doorShape);
+    doorBody.position.set(x, y - height / 2 + doorHeight / 2, z + depth / 2 + doorDepth / 2);
+    doorBody.collisionFilterGroup = 8;
+    doorBody.collisionFilterMask = 1 | 2 | 4;
+    world.addBody(doorBody); // Initially closed
 
-    // Store building dimensions for door interaction check
-    building.userData.width = buildingWidth;
-    building.userData.depth = buildingDepth;
+    buildingGroup.body = buildingBody;
+    buildingGroup.doorBody = doorBody;
+    buildingGroup.hasChest = false;
 
-    return { mesh: building, body: buildingBody, hasChest: false, door: door };
+    // Initialize door animation properties
+    buildingGroup.doorCurrentAngle = 0;
+    buildingGroup.doorTargetAngle = 0;
+    buildingGroup.doorBodyAdded = true;
+
+    scene.add(buildingGroup);
+
+    // Store building dimensions
+    buildingGroup.userData.width = width;
+    buildingGroup.userData.depth = depth;
+    buildingGroup.userData.height = height;
+
+    return buildingGroup;
+}
+
+function isAreaFlat(x, z, width, depth, threshold) {
+    const points = [
+        [x - width / 2, z - depth / 2],
+        [x + width / 2, z - depth / 2],
+        [x - width / 2, z + depth / 2],
+        [x + width / 2, z + depth / 2],
+        [x, z]
+    ];
+    let minHeight = Infinity;
+    let maxHeight = -Infinity;
+    points.forEach(point => {
+        const height = getTerrainHeight(point[0], point[1]);
+        if (height < minHeight) minHeight = height;
+        if (height > maxHeight) maxHeight = height;
+    });
+    return maxHeight - minHeight < threshold;
 }
 
 function spawnBuildings() {
-    for (let i = 0; i < TERRAIN_SIZE / 30; i++) {
-        if (Math.random() < BUILDING_SPAWN_CHANCE) {
-            const x = (Math.random() - 0.5) * TERRAIN_SIZE;
-            const z = (Math.random() - 0.5) * TERRAIN_SIZE;
-            const newBuilding = createBuilding(x, z);
-            buildings.push(newBuilding);
+    const numHousesToSpawn = Math.floor(Math.random() * 4) + 2; // Random number of houses from 2 to 5
+    const houseBaseWidth = 20; // Approximate base width of the house
+    const houseBaseDepth = 20; // Approximate base depth of the house
+    const flatAreaMargin = 50; // Margin around the house for flat area
+    const houseWidth = houseBaseWidth + flatAreaMargin; // Increased width for flat area
+    const houseDepth = houseBaseDepth + flatAreaMargin; // Increased depth for flat area
+    const houseLocations = [];
 
-            if (Math.random() < CHEST_SPAWN_CHANCE) {
-                createChest(newBuilding);
-            }
-        }
+    for (let i = 0; i < numHousesToSpawn; i++) {
+        const x = (Math.random() - 0.5) * TERRAIN_SIZE;
+        const z = (Math.random() - 0.5) * TERRAIN_SIZE;
+        const flatAreaHeight = getHeight(x, z); // Get height at the center for flattening
+
+        flattenTerrainArea(x, z, houseWidth, houseDepth, flatAreaHeight);
+        updateTerrainMesh(); // Update terrain mesh after flattening
+
+        houseLocations.push({ x, z });
     }
+
+    houseLocations.forEach(location => {
+        const height = 10 + Math.random() * 10;
+        const buildingWidth = 20 + Math.random() * 10; // Actual building width, can be smaller than flat area
+        const buildingDepth = 20 + Math.random() * 10; // Actual building depth, can be smaller than flat area
+        const newBuilding = createBuilding(location.x, location.z, buildingWidth, buildingDepth, height);
+        buildings.push(newBuilding);
+        if (Math.random() < CHEST_SPAWN_CHANCE) {
+            createChest(newBuilding);
+        }
+    });
 }
+
 
 // ### Chests
 function createChest(building) {
@@ -1725,12 +1916,12 @@ function createChest(building) {
     const chestMaterial = new THREE.MeshStandardMaterial({ color: 0xDAA520 });
     const chest = new THREE.Mesh(chestGeometry, chestMaterial);
 
-    const xOffset = (Math.random() - 0.5) * (building.mesh.geometry.parameters.width - chestWidth) * 0.8;
-    const zOffset = (Math.random() - 0.5) * (building.mesh.geometry.parameters.depth - chestDepth) * 0.8;
+    const xOffset = (Math.random() - 0.5) * (building.userData.width - chestWidth) * 0.8;
+    const zOffset = (Math.random() - 0.5) * (building.userData.depth - chestDepth) * 0.8;
 
-    chest.position.set(xOffset, -building.mesh.geometry.parameters.height / 2 + chestHeight / 2, zOffset);
+    chest.position.set(xOffset, -building.userData.height / 2 + chestHeight / 2, zOffset);
     chest.castShadow = true;
-    building.mesh.add(chest);
+    building.add(chest);
 
     building.chest = chest;
     building.hasChest = true;
@@ -1793,20 +1984,6 @@ function generateChestLoot() {
     return loot;
 }
 
-function spawnReferenceItems() {
-    const colors = [0xff0000, 0xffff00, 0x0000ff, 0xff00ff, 0x00ffff];
-    for (let i = 0; i < 20; i++) {
-        const x = (Math.random() - 0.5) * 200;
-        const z = (Math.random() - 0.5) * 200;
-        const y = getHeight(x, z) + 0.5;
-        const cubeMaterial = new THREE.MeshStandardMaterial({ color: colors[Math.floor(Math.random() * colors.length)] });
-        const cube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), cubeMaterial);
-        cube.position.set(x, y, z);
-        cube.castShadow = true;
-        cube.receiveShadow = true;
-        scene.add(cube);
-    }
-}
 
 // ### UI System
 function showFeedback(message) {
@@ -1893,8 +2070,8 @@ function drawMinimapEntity(entityMesh, color) {
 }
 
 function drawMinimapBuilding(building) {
-    const minimapX = (building.mesh.position.x * MINIMAP_SCALE + MINIMAP_SIZE / 2);
-    const minimapY = (building.mesh.position.z * MINIMAP_SCALE + MINIMAP_SIZE / 2);
+    const minimapX = (building.position.x * MINIMAP_SCALE + MINIMAP_SIZE / 2);
+    const minimapY = (building.position.z * MINIMAP_SCALE + MINIMAP_SIZE / 2);
     minimapCtx.fillStyle = 'gray';
     const size = 5;
     minimapCtx.fillRect(minimapX - size / 2, minimapY - size / 2, size, size);
@@ -1943,33 +2120,23 @@ function checkDoorInteraction() {
 }
 
 function interactWithDoor(building) {
-    if (!building.door) return;
+    if (!building.doorPivot || !building.doorBody) return;
     const door = building.door;
 
-    if (!door.userData.isOpen) {
-        // Open the door
-        door.rotation.y = Math.PI / 2;
-        door.userData.isOpen = true;
-        showFeedback("Door opened");
-        // Remove building body to allow entry
-        world.removeBody(building.body);
-    } else {
-        // Check if player is inside the building
-        const buildingPos = building.mesh.position;
-        const playerPos = playerMesh.position;
-        if (playerPos.x > buildingPos.x - building.userData.width / 2 &&
-            playerPos.x < buildingPos.x + building.userData.width / 2 &&
-            playerPos.z > buildingPos.z - building.userData.depth / 2 &&
-            playerPos.z < buildingPos.z + building.userData.depth / 2) {
-            showFeedback("Cannot close door while inside the building.");
-            return;
-        }
+    if (door.userData.isOpen) {
         // Close the door
-        door.rotation.y = 0;
+        building.doorTargetAngle = 0;
         door.userData.isOpen = false;
-        showFeedback("Door closed");
-        // Add building body back
-        world.addBody(building.body);
+        showFeedback("Closing door...");
+    } else {
+        // Open the door
+        building.doorTargetAngle = -Math.PI / 2;
+        door.userData.isOpen = true;
+        if (building.doorBodyAdded) {
+            world.removeBody(building.doorBody);
+            building.doorBodyAdded = false;
+        }
+        showFeedback("Opening door...");
     }
 }
 
@@ -1993,6 +2160,26 @@ function animate() {
     }
 
     camera.position.z = 15 * zoomLevel;
+
+    // Update door animations
+    buildings.forEach(building => {
+        if (Math.abs(building.doorCurrentAngle - building.doorTargetAngle) > 0.01) {
+            const animationSpeed = 5; // Radians per second
+            const deltaAngle = (building.doorTargetAngle - building.doorCurrentAngle) * animationSpeed * deltaTime;
+            building.doorCurrentAngle += deltaAngle;
+            if (Math.abs(building.doorCurrentAngle - building.doorTargetAngle) < 0.01) {
+                building.doorCurrentAngle = building.doorTargetAngle;
+                if (building.doorTargetAngle === 0 && !building.doorBodyAdded) {
+                    world.addBody(building.doorBody);
+                    building.doorBodyAdded = true;
+                }
+            }
+            building.doorPivot.rotation.y = building.doorCurrentAngle;
+        } else if (building.doorTargetAngle === 0 && !building.doorBodyAdded) {
+            world.addBody(building.doorBody);
+            building.doorBodyAdded = true;
+        }
+    });
 
     handleMovement(deltaTime);
     if (gameState.isAiming) handleAimModeMovement(deltaTime);
@@ -2098,12 +2285,14 @@ function init() {
                 clearInterval(checkPlayerLoaded);
                 playerMesh.castShadow = true;
 
+                // Generate terrain and buildings FIRST
+                spawnBuildings(); // This will flatten terrain and spawn buildings
+
+                // Then spawn resources, NPCs and trees AFTER the world is ready
                 for (let i = 0; i < 10; i++) spawnResource();
                 for (let i = 0; i < 3; i++) spawnEnemy();
                 for (let i = 0; i < 3; i++) spawnNPC();
                 spawnTrees();
-                spawnBuildings();
-                spawnReferenceItems();
 
                 animate();
             }
