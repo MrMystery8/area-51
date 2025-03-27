@@ -117,6 +117,7 @@ const gameState = {
     inventoryOpen: false,
     craftingOpen: false,
     questsOpen: false,
+    shopOpen: false, // Shop state
     campfirePlaced: false,
     campfirePosition: new THREE.Vector3(),
     lastAttackTime: 0,
@@ -139,7 +140,7 @@ const inventory = {
     campfire: 0,
     energy_cell: 0,
     plasma_cell: 0,
-    gold_coin: 0,
+    gold_coin: 20, // Starting coins for testing
 };
 
 // ### Crafting Recipes
@@ -154,11 +155,22 @@ const recipes = {
     plasma_cell: { crystal_shard: 2, fiber: 1 }
 };
 
+// ### Shop Items and Prices
+const shopItems = {
+    water_bottle: { price: 5, stock: 10 },
+    berries: { price: 2, stock: 20 },
+    meat: { price: 8, stock: 10 },
+    energy_cell: { price: 3, stock: 30},
+    plasma_cell: { price: 5, stock: 20},
+    campfire: { price: 15, stock: 5}
+};
+
 // ### Quest System
 const quests = [
     { id: 1, objective: "Collect 10 berries", progress: 0, target: 10, reward: "health_boost", completed: false },
     { id: 2, objective: "Defeat 5 enemies", progress: 0, target: 5, reward: "stamina_boost", completed: false },
-    { id: 3, objective: "Collect 3 alien crystals", progress: 0, target: 3, reward: "energy_blaster", completed: false }
+    { id: 3, objective: "Collect 3 alien crystals", progress: 0, target: 3, reward: "energy_blaster", completed: false },
+    { id: 4, objective: "Spend 20 gold coins", progress: 0, target: 20, reward: "plasma_rifle", completed: false} // New Quest
 ];
 
 // ### Physics Setup
@@ -424,6 +436,7 @@ function handleKeyDown(e) {
     if (e.key === 'i') toggleInventory();
     if (e.key === 'c') toggleCrafting();
     if (e.key === 'p') toggleQuests();
+    if (e.key === 'l') toggleShop(); // Toggle shop on 'l' key
     if (e.key === 'escape') togglePauseMenu();
     if (e.key === 'f') placeCampfire();
     if (e.key === 'u') unequipWeapon();
@@ -451,6 +464,9 @@ function handleKeyUp(e) {
     keys[e.key.toLowerCase()] = false;
     if (e.key.toLowerCase() === 'e') {
         checkDoorInteraction();
+        checkResourceCollection(); // Ensure resource collection is still checked with 'e'
+        checkNPCInteraction();      // Ensure NPC interaction is still checked with 'e'
+        checkChestInteraction();    // Ensure chest interaction is still checked with 'e'
     }
 }
 
@@ -927,6 +943,7 @@ function handleEnemyDefeat(enemy, index) {
     if (!enemy || !enemies.includes(enemy) || enemiesToRemove.includes(enemy)) return;
     enemiesToRemove.push(enemy);
     inventory.meat += Math.floor(Math.random() * 2) + 1;
+    inventory.gold_coin += Math.floor(Math.random() * 3) + 1; // Add gold coins on enemy defeat
     updateInventoryUI();
     gameState.enemiesDefeated++;
     checkQuests();
@@ -1020,6 +1037,7 @@ function updateInventoryUI() {
             itemsDiv.appendChild(itemDiv);
         }
     });
+    document.getElementById('coins').textContent = `Coins: ${inventory.gold_coin}`; // Update coin display in HUD
 }
 
 let campfireLight = null;
@@ -1162,6 +1180,53 @@ function useItem(item) {
     }
 }
 
+// ### Shop System
+function toggleShop() {
+    gameState.shopOpen = !gameState.shopOpen;
+    document.getElementById('shop').style.display = gameState.shopOpen ? 'block' : 'none';
+    if (gameState.shopOpen) updateShopUI();
+}
+
+function updateShopUI() {
+    const shopItemsDiv = document.getElementById('shop-items');
+    if (!shopItemsDiv) return;
+    shopItemsDiv.innerHTML = '';
+
+    Object.entries(shopItems).forEach(([itemName, itemDetails]) => {
+        if (itemDetails.stock > 0) {
+            const shopItemDiv = document.createElement('div');
+            shopItemDiv.className = 'shop-item';
+            shopItemDiv.innerHTML = `
+                <div>${itemName} - Price: ${itemDetails.price} coins (Stock: ${itemDetails.stock})</div>
+                <button onclick="purchaseItem('${itemName}')">Buy</button>
+            `;
+            shopItemsDiv.appendChild(shopItemDiv);
+        }
+    });
+}
+
+function purchaseItem(itemName) {
+    const itemDetails = shopItems[itemName];
+    if (!itemDetails) return;
+
+    if (inventory.gold_coin >= itemDetails.price) {
+        if (itemDetails.stock > 0) {
+            inventory.gold_coin -= itemDetails.price;
+            inventory[itemName]++;
+            itemDetails.stock--;
+            updateInventoryUI();
+            updateShopUI();
+            showFeedback(`Purchased ${itemName}!`);
+            checkQuests(); // Check quests after purchase
+        } else {
+            showFeedback(`${itemName} is out of stock!`);
+        }
+    } else {
+        showFeedback("Not enough gold coins!");
+    }
+}
+
+
 // ### Quest System
 function checkQuests() {
     quests.forEach(quest => {
@@ -1171,6 +1236,14 @@ function checkQuests() {
             case "Collect 10 berries": quest.progress = inventory.berries; break;
             case "Defeat 5 enemies": quest.progress = gameState.enemiesDefeated; break;
             case "Collect 3 alien crystals": quest.progress = inventory.alien_crystal; break;
+            case "Spend 20 gold coins":
+                let coinsSpentForQuest = 0;
+                let initialCoins = 20; // Assuming starting coins are around 20 for quest tracking, adjust if needed.
+                if (inventory.gold_coin < initialCoins) {
+                    coinsSpentForQuest = initialCoins - inventory.gold_coin;
+                }
+                quest.progress = coinsSpentForQuest;
+                break;
         }
 
         if (quest.progress >= quest.target) completeQuest(quest);
@@ -1184,6 +1257,9 @@ function completeQuest(quest) {
         case "health_boost": gameState.maxHealth += 20; gameState.health = gameState.maxHealth; break;
         case "stamina_boost": gameState.maxStamina += 20; gameState.stamina = gameState.maxStamina; break;
         case "energy_blaster": recipes.energy_blaster = { metal_scrap: 5, alien_crystal: 3 }; inventory.energy_blaster += 1; break;
+        case "plasma_rifle": recipes.plasma_rifle = { metal_scrap: 10, crystal_shard: 5, fiber: 2 }; inventory.plasma_rifle += 1; break; // Quest reward plasma rifle
+        case "laser_sword": inventory.laser_sword += 1; break; // Example coin reward
+        case "gold_coins_reward": inventory.gold_coin += 50; break; // Example coin reward
     }
     showFeedback(`Quest Complete: ${quest.objective}`);
     updateQuestUI();
@@ -1485,27 +1561,44 @@ function pulseScreenRed() {
 // ### Resource System
 function spawnResource() {
     const resourceTypes = [
-        { type: 'berries', modelName: 'berries' },
-        { type: 'stone', modelName: 'rock' },
-        { type: 'wood', modelName: 'wood' },
-        { type: 'alien_crystal', modelName: 'alien_crystal' },
-        { type: 'metal_scrap', modelName: 'metal' },
-        { type: 'water_bottle', modelName: 'water_bottle' },
-        { type: 'alien_water', modelName: 'alien_water' },
-        { type: 'fiber', modelName: 'fiber' },
-        { type: 'crystal_shard', modelName: 'crystal_shard' },
-        { type: 'alien_vine', modelName: 'alien_vine' },
-        { type: 'alien_fruit', modelName: 'alien_fruit' }
+        { type: 'berries', modelName: 'berries', chance: 0.3 },
+        { type: 'stone', modelName: 'rock', chance: 0.2 },
+        { type: 'wood', modelName: 'wood', chance: 0.2 },
+        { type: 'alien_crystal', modelName: 'alien_crystal', chance: 0.05 },
+        { type: 'metal_scrap', modelName: 'metal', chance: 0.1 },
+        { type: 'water_bottle', modelName: 'water_bottle', chance: 0.05 },
+        { type: 'alien_water', modelName: 'alien_water', chance: 0.05 },
+        { type: 'fiber', modelName: 'fiber', chance: 0.05 },
+        { type: 'crystal_shard', modelName: 'crystal_shard', chance: 0.05 },
+        { type: 'alien_vine', modelName: 'alien_vine', chance: 0.05 },
+        { type: 'alien_fruit', modelName: 'alien_fruit', chance: 0.05 },
+        { type: 'gold_coin', modelName: 'gold_coin_resource', chance: 0.03 } // Gold coin as resource
     ];
 
-    const resourceType = resourceTypes[Math.floor(Math.random() * resourceTypes.length)];
+    let totalChance = 0;
+    resourceTypes.forEach(type => totalChance += type.chance);
+    let rand = Math.random() * totalChance;
+    let selectedType = null;
+    for (const type of resourceTypes) {
+        rand -= type.chance;
+        if (rand <= 0) {
+            selectedType = type;
+            break;
+        }
+    }
+    if (!selectedType) return;
+
+
     const x = (Math.random() - 0.5) * TERRAIN_SIZE;
     const z = (Math.random() - 0.5) * TERRAIN_SIZE;
     const y = getHeight(x, z) + RESOURCE_HEIGHT_OFFSET;
 
     let resourceMesh;
-    if (models[resourceType.modelName]) {
-        resourceMesh = models[resourceType.modelName].clone();
+    let modelNameToLoad = selectedType.modelName;
+    if (modelNameToLoad === 'gold_coin_resource') modelNameToLoad = 'alien_crystal'; // Reuse model for gold coin for simplicity
+
+    if (models[modelNameToLoad]) {
+        resourceMesh = models[modelNameToLoad].clone();
         resourceMesh.scale.set(2, 2, 2);
     } else {
         resourceMesh = new THREE.Mesh(
@@ -1519,7 +1612,7 @@ function spawnResource() {
     scene.add(resourceMesh);
 
     resources.push({
-        type: resourceType.type,
+        type: selectedType.type,
         amount: Math.floor(Math.random() * 3) + 1,
         mesh: resourceMesh
     });
@@ -2223,6 +2316,7 @@ function updateHUD() {
     document.getElementById('hunger').textContent = `Hunger: ${Math.floor(gameState.hunger)}`;
     document.getElementById('thirst').textContent = `Thirst: ${Math.floor(gameState.thirst)}`;
     document.getElementById('stamina').textContent = `Stamina: ${Math.floor(gameState.stamina)}/${gameState.maxStamina}`;
+    document.getElementById('coins').textContent = `Coins: ${inventory.gold_coin}`; // Update coin display in HUD
 }
 
 // ### Initialization
@@ -2277,7 +2371,8 @@ function init() {
         loadGLTFModel('sword.glb', 'sword'),
         loadGLTFModel('tree.glb', 'tree'),
         loadGLTFModel('water_bottle.glb', 'water_bottle'),
-        loadGLTFModel('wood.glb', 'wood')
+        loadGLTFModel('wood.glb', 'wood'),
+        loadGLTFModel('gold_coin.glb', 'gold_coin_resource') // Load gold coin model - though reuses alien crystal model in code
     ]).then(() => {
         console.log("All assets loaded");
         const checkPlayerLoaded = setInterval(() => {
@@ -2310,6 +2405,7 @@ window.unequipWeapon = unequipWeapon;
 window.craftItem = craftItem;
 window.useItem = useItem;
 window.placeCampfire = placeCampfire;
+window.purchaseItem = purchaseItem; // Expose purchaseItem to HTML
 
 // Window Resize Handler
 window.addEventListener('resize', () => {

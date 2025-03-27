@@ -6,40 +6,75 @@
         body { margin: 0; overflow: hidden; }
         #game-canvas { width: 100%; height: 100%; }
         #hud { position: absolute; top: 10px; left: 10px; color: white; font-family: Arial; }
-        #inventory, #crafting, #quests { 
-            position: absolute; 
-            background: rgba(0, 0, 0, 0.8); 
-            color: white; 
-            padding: 10px; 
-            display: none; 
+        #inventory, #crafting, #quests, #shop {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            display: none;
         }
         #inventory { top: 50px; right: 10px; }
         #crafting { bottom: 50px; right: 10px; }
         #quests { bottom: 50px; left: 10px; }
-        .item, .recipe { margin: 5px 0; }
+        #shop { top: 50%; left: 50%; transform: translate(-50%, -50%); } /* Shop in the center */
+        .item, .recipe, .shop-item { margin: 5px 0; }
         .recipe.available button { background: green; }
         .recipe.unavailable button { background: red; }
-        #feedback { 
-            position: absolute; 
-            top: 50%; 
-            left: 50%; 
-            transform: translate(-50%, -50%); 
-            background: rgba(0, 0, 0, 0.8); 
-            color: white; 
-            padding: 10px; 
-            display: none; 
+        .shop-item button { background: blue; color: white; }
+        #feedback {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            display: none;
+        }
+         /* Include styles from style.css if needed directly, or link style.css */
+        #red-pulse {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: red;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+        #crosshair {
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid white;
+            border-radius: 50%;
+            pointer-events: none;
+            display: none;
+        }
+        #minimap { /* Style for the minimap canvas if you didn't use inline styles */
+            position: absolute;
+            left: 10px; /* MINIMAP_MARGIN */
+            bottom: 10px; /* MINIMAP_MARGIN */
+            border: 2px solid black;
+            background-color: rgba(50, 100, 50, 0.8);
         }
     </style>
 </head>
 <body>
-    <div id="red-pulse" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: red; opacity: 0; pointer-events: none; transition: opacity 0.2s;"></div>
+    <div id="red-pulse"></div>
     <canvas id="game-canvas"></canvas>
-    <div id="crosshair" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border: 2px solid white; border-radius: 50%; pointer-events: none; display: none;"></div>
+    <div id="crosshair"></div>
+    <canvas id="minimap"></canvas> <!-- Add canvas for minimap if not already done inline -->
     <div id="hud">
         <div id="health"></div>
         <div id="hunger"></div>
         <div id="thirst"></div>
         <div id="stamina"></div>
+        <div id="coins"></div>
     </div>
     <div id="inventory">
         <h2>Inventory (I)</h2>
@@ -52,6 +87,10 @@
     <div id="quests">
         <h2>Quests (P)</h2>
         <div id="quest-list"></div>
+    </div>
+    <div id="shop">
+        <h2>Shop (L)</h2>
+        <div id="shop-items"></div>
     </div>
     <div id="feedback"></div>
     <script type="module" src="game.js"></script>
