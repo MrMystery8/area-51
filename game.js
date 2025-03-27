@@ -42,6 +42,9 @@ const INVULNERABILITY_DURATION = 0.5;
 const BUILDING_SPAWN_CHANCE = 0.2;
 const CHEST_SPAWN_CHANCE = 0.5;
 const DOOR_INTERACTION_DISTANCE = 5;
+const LOOT_SPAWN_OFFSET = 0.5; // Offset from ground for spawned loot
+const LOOT_SPREAD_RADIUS = 1.0; // Radius to spread multiple loot items
+const RESOURCE_COLLECTION_DISTANCE = 3; // Define collection distance
 
 // ### Weapon Stats
 const weaponStats = {
@@ -214,8 +217,6 @@ function updateTerrainMesh() {
     for (let z = 0; z <= TERRAIN_SEGMENTS; z++) {
         for (let x = 0; x <= TERRAIN_SEGMENTS; x++) {
             const index = (z * (TERRAIN_SEGMENTS + 1) + x) * 3;
-            const xPos = (x * ELEMENT_SIZE) - TERRAIN_SIZE / 2;
-            const zPos = -((z * ELEMENT_SIZE) - TERRAIN_SIZE / 2); // Note the negation for zPos to align with terrainMesh orientation
             vertices[index + 2] = heightData[z][x]; // Use heightData to set vertex height
         }
     }
@@ -413,6 +414,23 @@ const enemiesToRemove = [];
 const gltfLoader = new GLTFLoader();
 const models = {};
 
+// Map item types to their model names for spawning loot
+const itemModelMap = {
+    berries: 'berries',
+    stone: 'rock',
+    wood: 'wood',
+    metal_scrap: 'metal',
+    alien_crystal: 'alien_crystal',
+    water_bottle: 'water_bottle',
+    alien_water: 'alien_water',
+    fiber: 'fiber',
+    crystal_shard: 'crystal_shard',
+    alien_vine: 'alien_vine',
+    meat: 'meat',
+    alien_fruit: 'alien_fruit',
+    gold_coin: 'gold_coin' // Use the actual gold_coin model name
+};
+
 function loadGLTFModel(url, name) {
     return new Promise((resolve, reject) => {
         gltfLoader.load(`assets/${url}`, (gltf) => {
@@ -460,14 +478,10 @@ function handleKeyDown(e) {
     }
 }
 
+// REVERTED handleKeyUp: Only sets the key state to false.
 function handleKeyUp(e) {
     keys[e.key.toLowerCase()] = false;
-    if (e.key.toLowerCase() === 'e') {
-        checkDoorInteraction();
-        checkResourceCollection(); // Ensure resource collection is still checked with 'e'
-        checkNPCInteraction();      // Ensure NPC interaction is still checked with 'e'
-        checkChestInteraction();    // Ensure chest interaction is still checked with 'e'
-    }
+    // Interaction checks are now called in the animate loop based on keys.e state
 }
 
 function togglePauseMenu() {
@@ -938,13 +952,91 @@ function checkMeleeHit() {
     });
 }
 
+// ### Loot Spawning
+function spawnLootItem(itemType, quantity, position) {
+    const modelName = itemModelMap[itemType];
+    if (!modelName || !models[modelName]) {
+        console.warn(`No model found for loot item type: ${itemType}`);
+        // Fallback: Spawn a simple sphere if model is missing
+        const fallbackGeometry = new THREE.SphereGeometry(0.2);
+        const fallbackMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
+        const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+        fallbackMesh.position.copy(position);
+        fallbackMesh.position.y += LOOT_SPAWN_OFFSET; // Add offset
+        scene.add(fallbackMesh);
+        resources.push({
+            type: itemType,
+            amount: quantity,
+            mesh: fallbackMesh
+        });
+        return fallbackMesh; // Return the mesh even if it's a fallback
+    }
+
+    const lootMesh = models[modelName].clone();
+    let scale = 1.0; // Default scale
+
+    // Adjust scale for specific items if needed
+    if (itemType === 'gold_coin') {
+        scale = 0.5; // Make coins smaller
+    } else if (itemType === 'meat') {
+        scale = 0.8;
+    } else {
+        scale = 1.5; // General resource scale
+    }
+    lootMesh.scale.set(scale, scale, scale);
+
+    lootMesh.position.copy(position);
+    lootMesh.position.y += LOOT_SPAWN_OFFSET; // Add offset from ground
+    lootMesh.castShadow = true;
+    lootMesh.receiveShadow = true;
+    scene.add(lootMesh);
+
+    resources.push({
+        type: itemType,
+        amount: quantity,
+        mesh: lootMesh
+    });
+
+    return lootMesh; // Return the created mesh
+}
+
+
 // ### Enemy Defeat
 function handleEnemyDefeat(enemy, index) {
     if (!enemy || !enemies.includes(enemy) || enemiesToRemove.includes(enemy)) return;
     enemiesToRemove.push(enemy);
-    inventory.meat += Math.floor(Math.random() * 2) + 1;
-    inventory.gold_coin += Math.floor(Math.random() * 3) + 1; // Add gold coins on enemy defeat
-    updateInventoryUI();
+
+    const deathPosition = enemy.mesh.position.clone();
+    deathPosition.y = getTerrainHeight(deathPosition.x, deathPosition.z); // Ensure spawn is on the ground
+
+    // Spawn meat
+    const meatAmount = Math.floor(Math.random() * 2) + 1;
+    if (meatAmount > 0) {
+        const meatPos = deathPosition.clone().add(
+            new THREE.Vector3(
+                (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2,
+                0,
+                (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2
+            )
+        );
+        spawnLootItem('meat', meatAmount, meatPos);
+    }
+
+    // Spawn gold coins
+    const coinAmount = Math.floor(Math.random() * 3) + 1;
+    if (coinAmount > 0) {
+        for (let i = 0; i < coinAmount; i++) { // Spawn individual coins
+             const coinPos = deathPosition.clone().add(
+                new THREE.Vector3(
+                    (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2,
+                    0,
+                    (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2
+                )
+            );
+            spawnLootItem('gold_coin', 1, coinPos); // Spawn 1 coin at a time
+        }
+    }
+
     gameState.enemiesDefeated++;
     checkQuests();
 }
@@ -1171,7 +1263,7 @@ function useItem(item) {
         'water_bottle': () => { gameState.thirst = Math.min(100, gameState.thirst + 30); inventory.water_bottle--; },
         'alien_water': () => { gameState.thirst = Math.min(100, gameState.thirst + 50); inventory.alien_water--; },
         'meat': () => { gameState.hunger = Math.min(100, gameState.hunger + 30); inventory.meat--; },
-        'gold_coin': () => { showFeedback("It's a shiny gold coin!"); }
+        'gold_coin': () => { showFeedback("It's a shiny gold coin! Use 'L' to open the shop."); } // Updated feedback
     };
 
     if (itemEffects[item]) {
@@ -1501,7 +1593,12 @@ function applyDamageToPlayer(damage) {
     gameState.lastAttackTime = clock.elapsedTime;
     pulseScreenRed();
     if (gameState.health <= 0) {
+        // Handle player death - for now, just reset health
         gameState.health = gameState.maxHealth;
+        showFeedback("You died! Respawning...");
+        // Potentially move player back to spawn point
+        playerBody.position.set(0, getHeight(0,0) + 2, 0);
+        playerBody.velocity.set(0,0,0);
     }
 }
 
@@ -1572,7 +1669,6 @@ function spawnResource() {
         { type: 'crystal_shard', modelName: 'crystal_shard', chance: 0.05 },
         { type: 'alien_vine', modelName: 'alien_vine', chance: 0.05 },
         { type: 'alien_fruit', modelName: 'alien_fruit', chance: 0.05 },
-        { type: 'gold_coin', modelName: 'gold_coin_resource', chance: 0.03 } // Gold coin as resource
     ];
 
     let totalChance = 0;
@@ -1595,7 +1691,6 @@ function spawnResource() {
 
     let resourceMesh;
     let modelNameToLoad = selectedType.modelName;
-    if (modelNameToLoad === 'gold_coin_resource') modelNameToLoad = 'alien_crystal'; // Reuse model for gold coin for simplicity
 
     if (models[modelNameToLoad]) {
         resourceMesh = models[modelNameToLoad].clone();
@@ -1605,6 +1700,7 @@ function spawnResource() {
             new THREE.SphereGeometry(0.3),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
         );
+        console.warn(`Using fallback mesh for resource: ${selectedType.type}`);
     }
     resourceMesh.position.set(x, y, z);
     resourceMesh.castShadow = true;
@@ -1618,19 +1714,26 @@ function spawnResource() {
     });
 }
 
+// REVERTED: Put 'if (keys.e)' check back inside
 function checkResourceCollection() {
-    if (keys.e) {
-        resources.forEach((resource, index) => {
+    if (keys.e && playerMesh) { // Check if key is pressed and player exists
+        // Iterate backwards to allow safe removal
+        for (let i = resources.length - 1; i >= 0; i--) {
+            const resource = resources[i];
+            if (!resource || !resource.mesh) continue; // Skip if resource or mesh is invalid
+
             const distance = playerMesh.position.distanceTo(resource.mesh.position);
-            if (distance < 2) {
-                inventory[resource.type] += resource.amount;
+            if (distance < RESOURCE_COLLECTION_DISTANCE) { // Use defined constant
+                inventory[resource.type] = (inventory[resource.type] || 0) + resource.amount; // Safely add to inventory
                 scene.remove(resource.mesh);
-                resources.splice(index, 1);
+                resources.splice(i, 1); // Remove from array
                 showFeedback(`Collected ${resource.amount} ${resource.type}!`);
                 checkQuests();
                 updateInventoryUI();
+                // Consider breaking after one collection per key press if desired
+                // break;
             }
-        });
+        }
     }
 }
 
@@ -1688,17 +1791,21 @@ function spawnNPC() {
     });
 }
 
+// REVERTED: Put 'if (keys.e)' check back inside
 function checkNPCInteraction() {
-    if (keys.e) {
+    if (keys.e && playerMesh) { // Check if key is pressed and player exists
         npcs.forEach(npc => {
+            if (!npc || !npc.mesh) return;
             const distance = playerMesh.position.distanceTo(npc.mesh.position);
-            if (distance < 3 && npc.quests.length > 0) {
+            if (distance < 3 && npc.quests.length > 0) { // Interaction distance for NPC
                 const quest = npc.quests[0];
                 if (!quests.some(existingQuest => existingQuest.id === quest.id)) {
                     quests.push(quest);
                     showFeedback(`New Quest from NPC: ${quest.objective}`);
                     npc.quests.shift();
                     updateQuestUI();
+                    // Consider breaking after one interaction per key press if desired
+                    // return; // (if using forEach, return acts like continue)
                 }
             }
         });
@@ -1922,7 +2029,12 @@ function createBuilding(x, z, width, depth, height) {
     const doorShape = new CANNON.Box(new CANNON.Vec3(doorWidth / 2, doorHeight / 2, doorDepth / 2));
     const doorBody = new CANNON.Body({ mass: 0, material: physicsMaterial });
     doorBody.addShape(doorShape);
-    doorBody.position.set(x, y - height / 2 + doorHeight / 2, z + depth / 2 + doorDepth / 2);
+    // Calculate door body initial position relative to world origin
+    const doorWorldPosX = x + hingeX + (doorWidth/2) * Math.cos(0); // Initial angle 0
+    const doorWorldPosY = y + hingeY;
+    const doorWorldPosZ = z + hingeZ + (doorWidth/2) * Math.sin(0); // Initial angle 0
+    doorBody.position.set(doorWorldPosX, doorWorldPosY, doorWorldPosZ);
+    doorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), 0); // Initial rotation
     doorBody.collisionFilterGroup = 8;
     doorBody.collisionFilterMask = 1 | 2 | 4;
     world.addBody(doorBody); // Initially closed
@@ -1934,7 +2046,7 @@ function createBuilding(x, z, width, depth, height) {
     // Initialize door animation properties
     buildingGroup.doorCurrentAngle = 0;
     buildingGroup.doorTargetAngle = 0;
-    buildingGroup.doorBodyAdded = true;
+    buildingGroup.doorBodyAdded = true; // Physics body starts added
 
     scene.add(buildingGroup);
 
@@ -1974,15 +2086,28 @@ function spawnBuildings() {
     const houseLocations = [];
 
     for (let i = 0; i < numHousesToSpawn; i++) {
-        const x = (Math.random() - 0.5) * TERRAIN_SIZE;
-        const z = (Math.random() - 0.5) * TERRAIN_SIZE;
-        const flatAreaHeight = getHeight(x, z); // Get height at the center for flattening
+        let attempts = 0;
+        let foundLocation = false;
+        while (attempts < 20 && !foundLocation) {
+            const x = (Math.random() - 0.5) * (TERRAIN_SIZE - houseWidth); // Ensure flat area is within bounds
+            const z = (Math.random() - 0.5) * (TERRAIN_SIZE - houseDepth);
+            const flatAreaHeight = getHeight(x, z); // Get height at the center for flattening
 
-        flattenTerrainArea(x, z, houseWidth, houseDepth, flatAreaHeight);
-        updateTerrainMesh(); // Update terrain mesh after flattening
-
-        houseLocations.push({ x, z });
+            // Check if area is reasonably flat before flattening
+            if (isAreaFlat(x, z, houseWidth, houseDepth, 5)) { // Threshold of 5 units height difference
+                flattenTerrainArea(x, z, houseWidth, houseDepth, flatAreaHeight);
+                houseLocations.push({ x, z });
+                foundLocation = true;
+            }
+            attempts++;
+        }
+        if (!foundLocation) {
+            console.warn("Could not find suitable flat location for building after multiple attempts.");
+        }
     }
+
+    // Update terrain mesh ONCE after all flattening is done
+    updateTerrainMesh();
 
     houseLocations.forEach(location => {
         const height = 10 + Math.random() * 10;
@@ -1999,44 +2124,59 @@ function spawnBuildings() {
 
 // ### Chests
 function createChest(building) {
-    if (!building || building.hasChest) return;
+    if (!building || building.hasChest || !models.chest) { // Check if chest model is loaded
+        if (!models.chest) console.warn("Chest model not loaded, cannot create chest.");
+        return;
+    }
 
-    const chestWidth = 1.5;
-    const chestHeight = 1;
-    const chestDepth = 1;
+    const chestMesh = models.chest.clone();
+    chestMesh.scale.set(2, 2, 2); // Adjust scale as needed
 
-    const chestGeometry = new THREE.BoxGeometry(chestWidth, chestHeight, chestDepth);
-    const chestMaterial = new THREE.MeshStandardMaterial({ color: 0xDAA520 });
-    const chest = new THREE.Mesh(chestGeometry, chestMaterial);
+    const chestHeight = 1.5; // Approximate height based on model/scale
 
-    const xOffset = (Math.random() - 0.5) * (building.userData.width - chestWidth) * 0.8;
-    const zOffset = (Math.random() - 0.5) * (building.userData.depth - chestDepth) * 0.8;
+    // Position inside the building
+    const xOffset = (Math.random() - 0.5) * (building.userData.width - 4) * 0.8; // Leave some margin
+    const zOffset = (Math.random() - 0.5) * (building.userData.depth - 4) * 0.8;
 
-    chest.position.set(xOffset, -building.userData.height / 2 + chestHeight / 2, zOffset);
-    chest.castShadow = true;
-    building.add(chest);
+    // Position relative to building group origin (center bottom)
+    chestMesh.position.set(xOffset, -building.userData.height / 2 + chestHeight / 2, zOffset);
+    chestMesh.castShadow = true;
+    chestMesh.receiveShadow = true;
+    building.add(chestMesh);
 
-    building.chest = chest;
+    building.chest = chestMesh;
     building.hasChest = true;
-    chest.userData.isOpenable = true;
-    chest.userData.building = building;
-    chest.userData.isOpen = false;
+    chestMesh.userData.isOpenable = true;
+    chestMesh.userData.building = building;
+    chestMesh.userData.isOpen = false;
+
+    // Add lid reference if model has separate lid part (assuming 'Lid' name)
+    chestMesh.traverse((child) => {
+        if (child.name === 'Lid') { // Adjust name if needed
+            chestMesh.userData.lid = child;
+        }
+    });
+    if (!chestMesh.userData.lid) {
+        console.warn("Chest model does not have a 'Lid' part for opening animation.");
+        chestMesh.userData.lid = chestMesh; // Fallback: rotate the whole chest
+    }
 }
 
+// REVERTED: Put 'if (keys.e)' check back inside
 function checkChestInteraction() {
-    if (keys.e) {
+    if (keys.e && playerMesh) { // Check if key is pressed and player exists
         buildings.forEach(building => {
             if (building.chest && building.chest.userData.isOpenable) {
-                const dist = playerMesh.position.distanceTo(
-                    new THREE.Vector3(
-                        building.body.position.x + building.chest.position.x,
-                        building.body.position.y + building.chest.position.y,
-                        building.body.position.z + building.chest.position.z
-                    )
-                );
+                // Calculate world position of the chest
+                const chestWorldPosition = new THREE.Vector3();
+                building.chest.getWorldPosition(chestWorldPosition);
 
-                if (dist < 5) {
+                const dist = playerMesh.position.distanceTo(chestWorldPosition);
+
+                if (dist < 5) { // Interaction distance for chest
                     openChest(building.chest);
+                    // Consider breaking after one interaction per key press if desired
+                    // return; // (if using forEach, return acts like continue)
                 }
             }
         });
@@ -2045,26 +2185,48 @@ function checkChestInteraction() {
 
 function openChest(chest) {
     if (!chest.userData.isOpen) {
-        chest.rotation.x = -Math.PI / 2;
+        // Animate opening (rotate the lid)
+        if (chest.userData.lid) {
+            chest.userData.lid.rotation.x = -Math.PI / 1.5; // Open angle
+        } else {
+            chest.rotation.x = -Math.PI / 2; // Fallback: rotate whole chest
+        }
         chest.userData.isOpen = true;
+        chest.userData.isOpenable = false; // Can only open once
+        showFeedback("Chest opened!");
 
         const loot = generateChestLoot();
+        const chestWorldPosition = new THREE.Vector3();
+        chest.getWorldPosition(chestWorldPosition);
+        chestWorldPosition.y = getTerrainHeight(chestWorldPosition.x, chestWorldPosition.z); // Base position on ground
+
+        // Spawn loot items around the chest
         Object.entries(loot).forEach(([item, quantity]) => {
-            inventory[item] += quantity;
-            showFeedback(`Found ${quantity} x ${item} in the chest!`);
+            // Spawn individual items if quantity > 1 for visual effect
+            for (let i = 0; i < quantity; i++) {
+                 const lootPos = chestWorldPosition.clone().add(
+                    new THREE.Vector3(
+                        (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2,
+                        0,
+                        (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2
+                    )
+                );
+                spawnLootItem(item, 1, lootPos); // Spawn 1 item at a time
+            }
         });
-        updateInventoryUI();
-        chest.userData.isOpenable = false;
     }
 }
 
+
 function generateChestLoot() {
     const possibleLoot = [
-        { item: 'gold_coin', min: 1, max: 10, chance: 0.9 },
+        { item: 'gold_coin', min: 5, max: 15, chance: 0.9 }, // More coins in chests
         { item: 'berries', min: 2, max: 5, chance: 0.7 },
         { item: 'water_bottle', min: 1, max: 2, chance: 0.6 },
         { item: 'metal_scrap', min: 1, max: 3, chance: 0.5 },
-        { item: 'alien_crystal', min: 1, max: 1, chance: 0.2 }
+        { item: 'alien_crystal', min: 1, max: 1, chance: 0.2 },
+        { item: 'energy_cell', min: 3, max: 8, chance: 0.4 }, // Added ammo
+        { item: 'plasma_cell', min: 2, max: 5, chance: 0.3 }, // Added ammo
     ];
 
     const loot = {};
@@ -2084,7 +2246,12 @@ function showFeedback(message) {
     if (!feedbackDiv) return;
     feedbackDiv.textContent = message;
     feedbackDiv.style.display = 'block';
-    setTimeout(() => feedbackDiv.style.display = 'none', 2000);
+    // Clear previous timeout if exists
+    if (feedbackDiv.timeoutId) clearTimeout(feedbackDiv.timeoutId);
+    feedbackDiv.timeoutId = setTimeout(() => {
+        feedbackDiv.style.display = 'none';
+        feedbackDiv.timeoutId = null;
+    }, 2000);
 }
 
 function toggleInventory() {
@@ -2149,6 +2316,8 @@ function updateMinimap() {
     drawMinimapEntity(playerMesh, 'blue');
     enemies.forEach(enemy => drawMinimapEntity(enemy.mesh, 'red'));
     buildings.forEach(building => drawMinimapBuilding(building));
+    // Optionally draw resources/loot on minimap
+    // resources.forEach(res => drawMinimapEntity(res.mesh, 'yellow')); // Could be too cluttered
 }
 
 function drawMinimapEntity(entityMesh, color) {
@@ -2157,7 +2326,7 @@ function drawMinimapEntity(entityMesh, color) {
     const minimapY = (entityMesh.position.z * MINIMAP_SCALE + MINIMAP_SIZE / 2);
     minimapCtx.fillStyle = color;
     minimapCtx.beginPath();
-    minimapCtx.arc(minimapX, minimapY, 5, 0, Math.PI * 2);
+    minimapCtx.arc(minimapX, minimapY, 3, 0, Math.PI * 2); // Smaller dots
     minimapCtx.closePath();
     minimapCtx.fill();
 }
@@ -2169,7 +2338,7 @@ function drawMinimapBuilding(building) {
     const size = 5;
     minimapCtx.fillRect(minimapX - size / 2, minimapY - size / 2, size, size);
 
-    if (building.hasChest) {
+    if (building.hasChest && building.chest && building.chest.userData.isOpenable) { // Only show unopened chests
         minimapCtx.fillStyle = 'yellow';
         minimapCtx.fillRect(minimapX - size / 4, minimapY - size / 4, size / 2, size / 2);
     }
@@ -2198,29 +2367,42 @@ function updatePlayerAttackAnimation() {
 }
 
 // ### Door Interaction
+// REVERTED: Put 'if (keys.e)' check back inside
 function checkDoorInteraction() {
-    buildings.forEach(building => {
-        if (building.door) {
-            const doorWorldPosition = new THREE.Vector3();
-            building.door.getWorldPosition(doorWorldPosition);
-            const distanceToDoor = playerMesh.position.distanceTo(doorWorldPosition);
+    if (keys.e && playerMesh) { // Check if key is pressed and player exists
+        buildings.forEach(building => {
+            if (building.door) {
+                const doorWorldPosition = new THREE.Vector3();
+                building.door.getWorldPosition(doorWorldPosition); // Get position of the interactive part
+                const distanceToDoor = playerMesh.position.distanceTo(doorWorldPosition);
 
-            if (distanceToDoor < DOOR_INTERACTION_DISTANCE) {
-                interactWithDoor(building);
+                if (distanceToDoor < DOOR_INTERACTION_DISTANCE) { // Use the constant
+                    interactWithDoor(building);
+                    // Consider breaking after one interaction per key press if desired
+                    // return; // (if using forEach, return acts like continue)
+                }
             }
-        }
-    });
+        });
+    }
 }
 
+// Note: interactWithDoor itself doesn't need the keys.e check,
+// it's called BY checkDoorInteraction which now has the check.
 function interactWithDoor(building) {
     if (!building.doorPivot || !building.doorBody) return;
     const door = building.door;
+
+    // Prevent interaction spam by checking if animation is already in progress
+    if (Math.abs(building.doorCurrentAngle - building.doorTargetAngle) > 0.05) {
+         return; // Already moving
+    }
 
     if (door.userData.isOpen) {
         // Close the door
         building.doorTargetAngle = 0;
         door.userData.isOpen = false;
         showFeedback("Closing door...");
+        // Physics body will be added back when animation finishes
     } else {
         // Open the door
         building.doorTargetAngle = -Math.PI / 2;
@@ -2254,42 +2436,86 @@ function animate() {
 
     camera.position.z = 15 * zoomLevel;
 
-    // Update door animations
+    // Update door animations and physics
     buildings.forEach(building => {
-        if (Math.abs(building.doorCurrentAngle - building.doorTargetAngle) > 0.01) {
-            const animationSpeed = 5; // Radians per second
-            const deltaAngle = (building.doorTargetAngle - building.doorCurrentAngle) * animationSpeed * deltaTime;
-            building.doorCurrentAngle += deltaAngle;
-            if (Math.abs(building.doorCurrentAngle - building.doorTargetAngle) < 0.01) {
+        if (building.doorPivot && building.doorBody) {
+            const doorAnimationSpeed = 5; // Radians per second
+            const angleDiff = building.doorTargetAngle - building.doorCurrentAngle;
+
+            if (Math.abs(angleDiff) > 0.01) {
+                const deltaAngle = Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), doorAnimationSpeed * deltaTime);
+                building.doorCurrentAngle += deltaAngle;
+
+                // Update visual rotation
+                building.doorPivot.rotation.y = building.doorCurrentAngle;
+
+                // Update physics body position and rotation IF it's added (i.e., when closing/closed)
+                if (building.doorBodyAdded) {
+                    // Recalculate world position based on current angle
+                    const hingeWorldPos = new THREE.Vector3();
+                    building.doorPivot.getWorldPosition(hingeWorldPos); // Pivot's world pos
+                    const doorWidth = building.door.geometry.parameters.width;
+                    const doorDepth = building.door.geometry.parameters.depth;
+
+                    // Center of the door relative to pivot
+                    const doorOffsetX = doorWidth / 2;
+
+                    // Calculate world position based on pivot and angle
+                    const doorWorldPosX = hingeWorldPos.x + doorOffsetX * Math.cos(building.doorCurrentAngle);
+                    const doorWorldPosY = hingeWorldPos.y; // Y should match pivot
+                    const doorWorldPosZ = hingeWorldPos.z + doorOffsetX * Math.sin(building.doorCurrentAngle);
+
+                    building.doorBody.position.set(doorWorldPosX, doorWorldPosY, doorWorldPosZ);
+                    building.doorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), building.doorCurrentAngle);
+                }
+
+            } else if (Math.abs(angleDiff) <= 0.01 && angleDiff !== 0) { // Snap only if difference is small but not zero
+                // Snap to target angle
                 building.doorCurrentAngle = building.doorTargetAngle;
-                if (building.doorTargetAngle === 0 && !building.doorBodyAdded) {
+                building.doorPivot.rotation.y = building.doorCurrentAngle;
+
+                // Add physics body back ONLY when fully closed (angle is 0)
+                if (building.doorCurrentAngle === 0 && !building.doorBodyAdded) {
+                     // Recalculate final closed position for physics body
+                    const hingeWorldPos = new THREE.Vector3();
+                    building.doorPivot.getWorldPosition(hingeWorldPos);
+                    const doorWidth = building.door.geometry.parameters.width;
+                    const doorOffsetX = doorWidth / 2;
+
+                    const doorWorldPosX = hingeWorldPos.x + doorOffsetX * Math.cos(0);
+                    const doorWorldPosY = hingeWorldPos.y;
+                    const doorWorldPosZ = hingeWorldPos.z + doorOffsetX * Math.sin(0);
+
+                    building.doorBody.position.set(doorWorldPosX, doorWorldPosY, doorWorldPosZ);
+                    building.doorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), 0);
                     world.addBody(building.doorBody);
                     building.doorBodyAdded = true;
                 }
             }
-            building.doorPivot.rotation.y = building.doorCurrentAngle;
-        } else if (building.doorTargetAngle === 0 && !building.doorBodyAdded) {
-            world.addBody(building.doorBody);
-            building.doorBodyAdded = true;
         }
     });
+
 
     handleMovement(deltaTime);
     if (gameState.isAiming) handleAimModeMovement(deltaTime);
     updatePlayerAttackAnimation();
     const tiltQuaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), targetTiltAngle);
     const targetQuaternion = targetFacingQuaternion.clone().multiply(tiltQuaternion);
-    playerMesh.quaternion.slerp(targetQuaternion, 0.2);
-    playerBody.quaternion.copy(playerMesh.quaternion);
+    if(playerMesh) playerMesh.quaternion.slerp(targetQuaternion, 0.2); // Check if playerMesh exists
+    if(playerBody && playerMesh) playerBody.quaternion.copy(playerMesh.quaternion); // Check if playerBody/Mesh exists
 
     handleCombat(deltaTime);
     updateSurvival(deltaTime);
     updateDayNightCycle(deltaTime);
     updateEnemies(deltaTime);
     updateBloodParticles(deltaTime);
+
+    // REVERTED: Call interaction checks here, they have internal 'if (keys.e)' checks now
     checkResourceCollection();
     checkNPCInteraction();
     checkChestInteraction();
+    checkDoorInteraction();
+
     updateMinimap();
     updateProjectiles(deltaTime);
     updateWeaponSwing(deltaTime);
@@ -2339,13 +2565,9 @@ function init() {
     crosshairDiv.style.display = 'none';
     document.body.appendChild(crosshairDiv);
 
-    inventory.axe = 1;
-    inventory.sword = 1;
-    inventory.energy_blaster = 1;
-    inventory.plasma_rifle = 1;
-    inventory.laser_sword = 1;
     inventory.energy_cell = 50;
     inventory.plasma_cell = 100;
+    inventory.campfire = 1; // Start with a campfire
 
     Promise.all([
         loadGLTFModel('alien_crystal.glb', 'alien_crystal'),
@@ -2372,7 +2594,8 @@ function init() {
         loadGLTFModel('tree.glb', 'tree'),
         loadGLTFModel('water_bottle.glb', 'water_bottle'),
         loadGLTFModel('wood.glb', 'wood'),
-        loadGLTFModel('gold_coin.glb', 'gold_coin_resource') // Load gold coin model - though reuses alien crystal model in code
+        loadGLTFModel('gold_coin.glb', 'gold_coin'), // Load gold coin model
+        loadGLTFModel('chest.glb', 'chest') // Load chest model
     ]).then(() => {
         console.log("All assets loaded");
         const checkPlayerLoaded = setInterval(() => {
@@ -2381,13 +2604,17 @@ function init() {
                 playerMesh.castShadow = true;
 
                 // Generate terrain and buildings FIRST
-                spawnBuildings(); // This will flatten terrain and spawn buildings
+                spawnBuildings(); // This will flatten terrain and spawn buildings (and potentially chests)
 
                 // Then spawn resources, NPCs and trees AFTER the world is ready
-                for (let i = 0; i < 10; i++) spawnResource();
-                for (let i = 0; i < 3; i++) spawnEnemy();
+                for (let i = 0; i < 30; i++) spawnResource(); // Spawn more initial resources
+                for (let i = 0; i < 5; i++) spawnEnemy(); // Spawn more initial enemies
                 for (let i = 0; i < 3; i++) spawnNPC();
                 spawnTrees();
+
+                updateInventoryUI(); // Initial UI update
+                updateQuestUI(); // Initial UI update
+                updateCraftingUI(); // Initial UI update
 
                 animate();
             }
