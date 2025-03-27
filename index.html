@@ -1,98 +1,272 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Survival Game</title>
-    <style>
-        body { margin: 0; overflow: hidden; }
-        #game-canvas { width: 100%; height: 100%; }
-        #hud { position: absolute; top: 10px; left: 10px; color: white; font-family: Arial; }
-        #inventory, #crafting, #quests, #shop {
-            position: absolute;
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 10px;
-            display: none;
-        }
-        #inventory { top: 50px; right: 10px; }
-        #crafting { bottom: 50px; right: 10px; }
-        #quests { bottom: 50px; left: 10px; }
-        #shop { top: 50%; left: 50%; transform: translate(-50%, -50%); } /* Shop in the center */
-        .item, .recipe, .shop-item { margin: 5px 0; }
-        .recipe.available button { background: green; }
-        .recipe.unavailable button { background: red; }
-        .shop-item button { background: blue; color: white; }
-        #feedback {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 10px;
-            display: none;
-        }
-         /* Include styles from style.css if needed directly, or link style.css */
-        #red-pulse {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: red;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.2s;
-        }
-        #crosshair {
-            position: fixed;
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            width: 20px;
-            height: 20px;
-            border: 2px solid white;
-            border-radius: 50%;
-            pointer-events: none;
-            display: none;
-        }
-        #minimap { /* Style for the minimap canvas if you didn't use inline styles */
-            position: absolute;
-            left: 10px; /* MINIMAP_MARGIN */
-            bottom: 10px; /* MINIMAP_MARGIN */
-            border: 2px solid black;
-            background-color: rgba(50, 100, 50, 0.8);
-        }
-    </style>
+    <title>Survival Game - Enhanced UI</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div id="red-pulse"></div>
+    <!-- Game Canvas -->
     <canvas id="game-canvas"></canvas>
+
+    <!-- Red Damage Pulse Overlay -->
+    <div id="red-pulse"></div>
+
+    <!-- Crosshair -->
     <div id="crosshair"></div>
-    <canvas id="minimap"></canvas> <!-- Add canvas for minimap if not already done inline -->
+
+    <!-- Heads-Up Display (HUD) -->
     <div id="hud">
-        <div id="health"></div>
-        <div id="hunger"></div>
-        <div id="thirst"></div>
-        <div id="stamina"></div>
-        <div id="coins"></div>
+        <div class="hud-stat-group">
+            <div class="hud-stat">
+                <span class="hud-label">HP</span>
+                <div class="stat-bar-container">
+                    <div id="health-bar" class="stat-bar"></div>
+                </div>
+                <span id="health-text" class="hud-value">100/100</span>
+            </div>
+            <div class="hud-stat">
+                <span class="hud-label">ST</span>
+                <div class="stat-bar-container">
+                    <div id="stamina-bar" class="stat-bar"></div>
+                </div>
+                <span id="stamina-text" class="hud-value">100/100</span>
+            </div>
+            <div class="hud-stat">
+                <span class="hud-label">HUN</span>
+                <div class="stat-bar-container">
+                    <div id="hunger-bar" class="stat-bar"></div>
+                </div>
+                <span id="hunger-text" class="hud-value">100</span>
+            </div>
+            <div class="hud-stat">
+                <span class="hud-label">THI</span>
+                <div class="stat-bar-container">
+                    <div id="thirst-bar" class="stat-bar"></div>
+                </div>
+                <span id="thirst-text" class="hud-value">100</span>
+            </div>
+        </div>
+        <div id="coins" class="hud-coins">
+            <span class="coin-icon"></span> Coins: <span id="coin-amount">0</span>
+        </div>
+         <div id="ammo-display" class="hud-ammo">
+            Ammo: <span id="ammo-count">N/A</span>
+        </div>
     </div>
-    <div id="inventory">
+
+    <!-- Minimap -->
+    <canvas id="minimap"></canvas>
+
+    <!-- UI Panels -->
+    <div class="ui-panel" id="inventory">
         <h2>Inventory (I)</h2>
-        <div id="inventory-items"></div>
+        <div id="inventory-items" class="panel-content"></div>
+        <button class="close-button" onclick="toggleInventory()">X</button>
     </div>
-    <div id="crafting">
+
+    <div class="ui-panel" id="crafting">
         <h2>Crafting (C)</h2>
-        <div id="crafting-recipes"></div>
+        <div id="crafting-recipes" class="panel-content"></div>
+        <button class="close-button" onclick="toggleCrafting()">X</button>
     </div>
-    <div id="quests">
+
+    <div class="ui-panel" id="quests">
         <h2>Quests (P)</h2>
-        <div id="quest-list"></div>
+        <div id="quest-list" class="panel-content"></div>
+        <button class="close-button" onclick="toggleQuests()">X</button>
     </div>
-    <div id="shop">
+
+    <div class="ui-panel" id="shop">
         <h2>Shop (L)</h2>
-        <div id="shop-items"></div>
+        <div id="shop-items" class="panel-content"></div>
+        <button class="close-button" onclick="toggleShop()">X</button>
     </div>
+
+    <!-- Feedback Message Area -->
     <div id="feedback"></div>
+
+    <!-- Game Script -->
     <script type="module" src="game.js"></script>
+
+    <!-- Helper script for UI updates -->
+    <script>
+        // Expose toggle functions globally if they aren't already
+        window.toggleInventory = () => {
+            const panel = document.getElementById('inventory');
+            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+            // This assumes gameState.inventoryOpen is handled in main.js
+        };
+        window.toggleCrafting = () => {
+            const panel = document.getElementById('crafting');
+            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+            // This assumes gameState.craftingOpen is handled in main.js
+        };
+        window.toggleQuests = () => {
+            const panel = document.getElementById('quests');
+            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+            // This assumes gameState.questsOpen is handled in main.js
+        };
+         window.toggleShop = () => {
+            const panel = document.getElementById('shop');
+            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+            // This assumes gameState.shopOpen is handled in main.js
+        };
+
+        // Update HUD elements (Example - Needs integration with main.js gameState)
+        function updateHUDDisplay(gameState, inventory) {
+            const healthPercent = (gameState.health / gameState.maxHealth) * 100;
+            document.getElementById('health-bar').style.width = `${healthPercent}%`;
+            document.getElementById('health-text').textContent = `${Math.floor(gameState.health)}/${gameState.maxHealth}`;
+
+            const staminaPercent = (gameState.stamina / gameState.maxStamina) * 100;
+            document.getElementById('stamina-bar').style.width = `${staminaPercent}%`;
+            document.getElementById('stamina-text').textContent = `${Math.floor(gameState.stamina)}/${gameState.maxStamina}`;
+
+            document.getElementById('hunger-bar').style.width = `${gameState.hunger}%`;
+            document.getElementById('hunger-text').textContent = `${Math.floor(gameState.hunger)}`;
+
+            document.getElementById('thirst-bar').style.width = `${gameState.thirst}%`;
+            document.getElementById('thirst-text').textContent = `${Math.floor(gameState.thirst)}`;
+
+            document.getElementById('coin-amount').textContent = inventory.gold_coin;
+
+            // Ammo Display Logic (Integrate with main.js)
+            let ammoText = 'N/A';
+            if (gameState.equippedWeapon && (gameState.equippedWeapon === 'energy_blaster' || gameState.equippedWeapon === 'plasma_rifle')) {
+                const gunData = gameState.gunAmmo[gameState.equippedWeapon];
+                const ammoType = window.weaponStats[gameState.equippedWeapon].ammoType; // Assuming weaponStats is global or accessible
+                const reserveAmmo = inventory[ammoType] || 0;
+                ammoText = `${gunData.magazine} / ${reserveAmmo}`;
+                 if (gameState.isReloading) {
+                    ammoText = 'Reloading...';
+                }
+            }
+            document.getElementById('ammo-count').textContent = ammoText;
+        }
+
+        // --- Shim for updateHUD function used in main.js ---
+        // This allows the existing main.js updateHUD call to work with the new structure.
+        // Make sure your main.js correctly passes gameState and inventory.
+        // If main.js doesn't pass them, you might need to access them globally if available,
+        // or modify main.js slightly to pass the required data.
+        function updateHUD() {
+             // Check if gameState and inventory are accessible globally (adjust if needed)
+            if (typeof window.gameState !== 'undefined' && typeof window.inventory !== 'undefined') {
+                updateHUDDisplay(window.gameState, window.inventory);
+            } else {
+                // Fallback or error handling if state is not accessible
+                 // console.warn("Cannot update HUD: gameState or inventory not found globally.");
+                 // You might need to update the old text elements as a fallback if the bars don't work
+                 const gs = window.gameState || {}; // Use empty object as fallback
+                 const inv = window.inventory || {};
+                 document.getElementById('health-text').textContent = `HP: ${Math.floor(gs.health || 0)}/${gs.maxHealth || 100}`;
+                 document.getElementById('stamina-text').textContent = `ST: ${Math.floor(gs.stamina || 0)}/${gs.maxStamina || 100}`;
+                 document.getElementById('hunger-text').textContent = `HUN: ${Math.floor(gs.hunger || 0)}`;
+                 document.getElementById('thirst-text').textContent = `THI: ${Math.floor(gs.thirst || 0)}`;
+                 document.getElementById('coin-amount').textContent = inv.gold_coin || 0;
+                 document.getElementById('ammo-count').textContent = 'N/A'; // Fallback ammo
+            }
+        }
+         // Make updateHUD globally accessible if main.js calls it directly
+         window.updateHUD = updateHUD;
+
+         // --- Shim for UI Panel Updates ---
+         // These functions are called from main.js. They need to exist globally.
+         // We'll update the structure slightly to fit the new panel design.
+
+         window.updateInventoryUI = function() {
+            const itemsDiv = document.getElementById('inventory-items');
+            if (!itemsDiv || typeof window.inventory === 'undefined') return;
+            itemsDiv.innerHTML = ''; // Clear previous items
+
+            Object.entries(window.inventory).forEach(([item, qty]) => {
+                if (qty > 0) {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'item'; // Use the new class
+                    itemDiv.innerHTML = `
+                        <span class="item-name">${item.replace(/_/g, ' ')}</span>: <span class="item-qty">${qty}</span>
+                        <div class="item-actions">
+                        ${['axe', 'sword', 'energy_blaster', 'plasma_rifle', 'laser_sword'].includes(item) ?
+                            `<button onclick="equipWeapon('${item}')">Equip</button>` : ''}
+                        ${['campfire'].includes(item) ?
+                            `<button onclick="placeCampfire()">Place</button>` : ''}
+                        ${['berries', 'alien_fruit', 'water_bottle', 'alien_water', 'meat'].includes(item) ?
+                            `<button onclick="useItem('${item}')">Use</button>` : ''}
+                        ${item === 'gold_coin' ? '' : ''}
+                         </div>
+                    `; // Removed button for gold coin, added actions div
+                    itemsDiv.appendChild(itemDiv);
+                }
+            });
+         };
+
+         window.updateCraftingUI = function() {
+            const recipesDiv = document.getElementById('crafting-recipes');
+             if (!recipesDiv || typeof window.recipes === 'undefined' || typeof window.inventory === 'undefined') return;
+            recipesDiv.innerHTML = ''; // Clear previous recipes
+
+            Object.entries(window.recipes).forEach(([item, recipe]) => {
+                const canCraft = Object.keys(recipe).every(res => window.inventory[res] >= recipe[res]);
+                const recipeDiv = document.createElement('div');
+                recipeDiv.className = `recipe ${canCraft ? 'available' : 'unavailable'}`; // Use the new class
+                let ingredientsHTML = Object.entries(recipe)
+                                        .map(([res, qty]) => `${res.replace(/_/g, ' ')}: ${qty}`)
+                                        .join(', ');
+
+                recipeDiv.innerHTML = `
+                    <h3 class="recipe-name">${item.replace(/_/g, ' ')}</h3>
+                    <p class="recipe-ingredients">Requires: ${ingredientsHTML}</p>
+                    <button onclick="craftItem('${item}')" ${!canCraft ? 'disabled' : ''}>Craft</button>
+                `;
+                recipesDiv.appendChild(recipeDiv);
+            });
+         };
+
+         window.updateQuestUI = function() {
+             const questList = document.getElementById('quest-list');
+             if (!questList || typeof window.quests === 'undefined') return;
+             questList.innerHTML = ''; // Clear previous quests
+
+             window.quests.forEach(quest => {
+                 const questDiv = document.createElement('div');
+                 questDiv.className = `quest ${quest.completed ? 'completed' : 'active'}`; // Use the new class
+                 questDiv.innerHTML = `
+                    <p class="quest-objective">${quest.objective} (${quest.progress}/${quest.target})</p>
+                    ${quest.completed ? '<span class="quest-status">- Completed</span>' : ''}
+                 `;
+                 questList.appendChild(questDiv);
+             });
+         };
+
+         window.updateShopUI = function() {
+            const shopItemsDiv = document.getElementById('shop-items');
+             if (!shopItemsDiv || typeof window.shopItems === 'undefined' || typeof window.inventory === 'undefined') return;
+            shopItemsDiv.innerHTML = ''; // Clear previous items
+
+            Object.entries(window.shopItems).forEach(([itemName, itemDetails]) => {
+                const canAfford = window.inventory.gold_coin >= itemDetails.price;
+                const shopItemDiv = document.createElement('div');
+                shopItemDiv.className = `shop-item ${canAfford && itemDetails.stock > 0 ? 'available' : 'unavailable'}`; // Use the new class
+                shopItemDiv.innerHTML = `
+                    <span class="item-name">${itemName.replace(/_/g, ' ')}</span>
+                    <span class="item-details"> - Price: ${itemDetails.price} <span class="coin-icon-small"></span> (Stock: ${itemDetails.stock})</span>
+                    <button onclick="purchaseItem('${itemName}')" ${!canAfford || itemDetails.stock <= 0 ? 'disabled' : ''}>Buy</button>
+                `;
+                shopItemsDiv.appendChild(shopItemDiv);
+            });
+         };
+
+         // Ensure feedback queue processing exists (copied from main.js for safety, can be removed if main.js handles it)
+        const feedbackQueue = window.feedbackQueue || [];
+        let isFeedbackShowing = window.isFeedbackShowing || false;
+        let feedbackTimeoutId = window.feedbackTimeoutId || null;
+        const FEEDBACK_MESSAGE_DURATION = window.FEEDBACK_MESSAGE_DURATION || 1500; // Use existing or default
+
+
+
+    </script>
 </body>
 </html>

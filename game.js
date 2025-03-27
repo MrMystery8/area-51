@@ -1,3 +1,13 @@
+// Future work: 
+// 1. Glowy Chests/Bigger Chests
+// 2. Health regeneration
+// 3. Enemy health bar
+// 4. Item Naming
+// 5. Item pics in shop/feedback
+// 6. Bullet enhancements
+// 7. Torch or light source for houses
+// 8. More quests/ better npc interaction
+
 import * as THREE from 'https://cdn.skypack.dev/three@0.128.0';
 import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
 import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
@@ -390,8 +400,10 @@ directionalLight.shadow.camera.bottom = -TERRAIN_SIZE / 2;
 scene.add(directionalLight);
 
 // ### Minimap Setup
-const minimapCanvas = document.createElement('canvas');
-const minimapCtx = minimapCanvas.getContext('2d');
+const minimapCanvas = document.getElementById('minimap'); // Get the HTML canvas
+let minimapCtx = null; // Initialize context as null
+if (minimapCanvas) {
+    minimapCtx = minimapCanvas.getContext('2d');
 minimapCanvas.width = MINIMAP_SIZE;
 minimapCanvas.height = MINIMAP_SIZE;
 minimapCanvas.style.position = 'absolute';
@@ -400,6 +412,9 @@ minimapCanvas.style.bottom = `${MINIMAP_MARGIN}px`;
 minimapCanvas.style.border = '2px solid black';
 minimapCanvas.style.backgroundColor = "rgba(50, 100, 50, 0.8)";
 document.body.appendChild(minimapCanvas);
+} else {
+    console.error("Minimap canvas element not found!");
+}
 
 // ### Game Entities
 let resources = [];
@@ -2261,44 +2276,72 @@ function generateChestLoot() {
 }
 
 
-// ### UI System - Feedback Queue Implementation
+// ### UI System - Feedback Queue Implementation (MODIFIED) ###
 const feedbackQueue = [];
 let isFeedbackShowing = false;
 let feedbackTimeoutId = null; // Store the timeout ID
 
 function queueFeedback(message) {
     feedbackQueue.push(message);
-    processFeedbackQueue();
+    processFeedbackQueue(); // Try to process immediately
 }
 
 function processFeedbackQueue() {
+    // Check if already showing or queue empty
     if (isFeedbackShowing || feedbackQueue.length === 0) {
         return;
     }
 
-    isFeedbackShowing = true;
-    const message = feedbackQueue.shift();
-    const feedbackDiv = document.getElementById('feedback');
+    isFeedbackShowing = true; // Mark as showing
+    const message = feedbackQueue.shift(); // Get message
+    const feedbackDiv = document.getElementById('feedback'); // Get element
 
     if (feedbackDiv) {
-        feedbackDiv.textContent = message;
-        feedbackDiv.style.display = 'block';
+        feedbackDiv.textContent = message; // Set text
+        feedbackDiv.style.display = 'block'; // Make it visible FIRST
 
-        // Clear any existing timeout before setting a new one
+        // Use a tiny timeout to allow the browser to render the 'display: block'
+        // before starting the opacity transition. This often helps.
+        setTimeout(() => {
+            feedbackDiv.style.opacity = 1; // Start fade-in
+        }, 10); // Small delay (10ms)
+
+        // Clear any previous timeout for hiding this specific element
         if (feedbackTimeoutId) {
             clearTimeout(feedbackTimeoutId);
+            feedbackTimeoutId = null;
         }
 
+        // Set timeout to start hiding process
         feedbackTimeoutId = setTimeout(() => {
-            feedbackDiv.style.display = 'none';
-            isFeedbackShowing = false;
-            feedbackTimeoutId = null; // Clear the stored ID
-            processFeedbackQueue(); // Process the next message
-        }, FEEDBACK_MESSAGE_DURATION);
+            feedbackDiv.style.opacity = 0; // Start fade-out
+
+            // Use 'transitionend' event listener to set display:none AFTER fade-out completes
+            const handleTransitionEnd = () => {
+                // Only hide if opacity is indeed 0 (prevents issues if another message starts quickly)
+                // Check opacity style directly, not computed style, as it reflects the target value
+                if (feedbackDiv.style.opacity === '0') {
+                    feedbackDiv.style.display = 'none';
+                }
+                // Remove listener after it fires
+                feedbackDiv.removeEventListener('transitionend', handleTransitionEnd);
+
+                 // Now that it's hidden, allow the next message to show
+                isFeedbackShowing = false;
+                feedbackTimeoutId = null; // Clear ID
+                processFeedbackQueue(); // Check for the next message *after* hiding completes
+            };
+
+            // Add the event listener only once
+            feedbackDiv.addEventListener('transitionend', handleTransitionEnd, { once: true });
+
+        }, FEEDBACK_MESSAGE_DURATION); // Duration message stays fully visible
+
     } else {
-        // If feedbackDiv doesn't exist, skip this message and try the next
-        isFeedbackShowing = false;
-        processFeedbackQueue();
+        // Feedback div not found, skip message and try next
+        console.error("Feedback element (#feedback) not found!");
+        isFeedbackShowing = false; // Allow next attempt
+        // Don't immediately call processFeedbackQueue again if element is missing, prevents potential infinite loop
     }
 }
 
@@ -2361,8 +2404,12 @@ function updateDayNightCycle(deltaTime) {
 
 // ### Minimap Update
 function updateMinimap() {
-    minimapCtx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
-    drawMinimapEntity(playerMesh, 'blue');
+    if (!minimapCtx) return;
+
+    minimapCtx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE); 
+    if (playerMesh) {
+        drawMinimapEntity(playerMesh, 'blue');
+    }
     enemies.forEach(enemy => drawMinimapEntity(enemy.mesh, 'red'));
     buildings.forEach(building => drawMinimapBuilding(building));
     // Draw resources/loot on minimap (optional, can be cluttered)
@@ -2370,26 +2417,45 @@ function updateMinimap() {
 }
 
 function drawMinimapEntity(entityMesh, color) {
-    if (!entityMesh) return;
+    // Check if context is valid
+    if (!minimapCtx || !entityMesh) return;
+
+    // Use MINIMAP_SIZE for centering calculation
     const minimapX = (entityMesh.position.x * MINIMAP_SCALE + MINIMAP_SIZE / 2);
     const minimapY = (entityMesh.position.z * MINIMAP_SCALE + MINIMAP_SIZE / 2);
+
+    // Clamp coordinates to stay within the minimap boundaries
+    const clampedX = Math.max(3, Math.min(MINIMAP_SIZE - 3, minimapX));
+    const clampedY = Math.max(3, Math.min(MINIMAP_SIZE - 3, minimapY));
+
     minimapCtx.fillStyle = color;
     minimapCtx.beginPath();
-    minimapCtx.arc(minimapX, minimapY, 3, 0, Math.PI * 2); // Smaller dots
+    minimapCtx.arc(clampedX, clampedY, 3, 0, Math.PI * 2); // Draw clamped position
     minimapCtx.closePath();
     minimapCtx.fill();
 }
 
 function drawMinimapBuilding(building) {
+    // Check if context is valid
+    if (!minimapCtx || !building) return;
+
+    // Use MINIMAP_SIZE for centering calculation
     const minimapX = (building.position.x * MINIMAP_SCALE + MINIMAP_SIZE / 2);
     const minimapY = (building.position.z * MINIMAP_SCALE + MINIMAP_SIZE / 2);
-    minimapCtx.fillStyle = 'gray';
-    const size = 5;
-    minimapCtx.fillRect(minimapX - size / 2, minimapY - size / 2, size, size);
+    const size = 5; // Size of the building marker
 
-    if (building.hasChest && building.chest && building.chest.userData.isOpenable) { // Only show unopened chests
+    // Clamp coordinates
+    const clampedX = Math.max(size / 2, Math.min(MINIMAP_SIZE - size / 2, minimapX));
+    const clampedY = Math.max(size / 2, Math.min(MINIMAP_SIZE - size / 2, minimapY));
+
+
+    minimapCtx.fillStyle = 'gray';
+    minimapCtx.fillRect(clampedX - size / 2, clampedY - size / 2, size, size); // Draw clamped position
+
+    // Draw chest indicator if applicable (use clamped position)
+    if (building.hasChest && building.chest && building.chest.userData.isOpenable) {
         minimapCtx.fillStyle = 'yellow';
-        minimapCtx.fillRect(minimapX - size / 4, minimapY - size / 4, size / 2, size / 2);
+        minimapCtx.fillRect(clampedX - size / 4, clampedY - size / 4, size / 2, size / 2);
     }
 }
 
@@ -2579,13 +2645,62 @@ function animate() {
     requestAnimationFrame(animate);
 }
 
-// ### HUD Update
+// ### HUD Update (MODIFIED FUNCTION)
 function updateHUD() {
-    document.getElementById('health').textContent = `Health: ${Math.floor(gameState.health)}/${gameState.maxHealth}`;
-    document.getElementById('hunger').textContent = `Hunger: ${Math.floor(gameState.hunger)}`;
-    document.getElementById('thirst').textContent = `Thirst: ${Math.floor(gameState.thirst)}`;
-    document.getElementById('stamina').textContent = `Stamina: ${Math.floor(gameState.stamina)}/${gameState.maxStamina}`;
-    document.getElementById('coins').textContent = `Coins: ${inventory.gold_coin}`; // Update coin display in HUD
+    // Target the new elements based on the updated index.html
+    const healthBar = document.getElementById('health-bar');
+    const healthText = document.getElementById('health-text');
+    const staminaBar = document.getElementById('stamina-bar');
+    const staminaText = document.getElementById('stamina-text');
+    const hungerBar = document.getElementById('hunger-bar');
+    const hungerText = document.getElementById('hunger-text');
+    const thirstBar = document.getElementById('thirst-bar');
+    const thirstText = document.getElementById('thirst-text');
+    const coinAmount = document.getElementById('coin-amount');
+    const ammoCount = document.getElementById('ammo-count');
+
+    // Calculate percentages for bars
+    const healthPercent = Math.max(0, Math.min(100, (gameState.health / gameState.maxHealth) * 100));
+    const staminaPercent = Math.max(0, Math.min(100, (gameState.stamina / gameState.maxStamina) * 100));
+    const hungerPercent = Math.max(0, Math.min(100, gameState.hunger));
+    const thirstPercent = Math.max(0, Math.min(100, gameState.thirst));
+
+    // Update Health
+    if (healthBar) healthBar.style.width = `${healthPercent}%`;
+    if (healthText) healthText.textContent = `${Math.floor(gameState.health)}/${gameState.maxHealth}`;
+
+    // Update Stamina
+    if (staminaBar) staminaBar.style.width = `${staminaPercent}%`;
+    if (staminaText) staminaText.textContent = `${Math.floor(gameState.stamina)}/${gameState.maxStamina}`;
+
+    // Update Hunger
+    if (hungerBar) hungerBar.style.width = `${hungerPercent}%`;
+    if (hungerText) hungerText.textContent = `${Math.floor(gameState.hunger)}`;
+
+    // Update Thirst
+    if (thirstBar) thirstBar.style.width = `${thirstPercent}%`;
+    if (thirstText) thirstText.textContent = `${Math.floor(gameState.thirst)}`;
+
+    // Update Coins
+    if (coinAmount) coinAmount.textContent = inventory.gold_coin;
+
+    // Update Ammo Display
+    if (ammoCount) {
+        let ammoTextContent = 'N/A';
+        const equipped = gameState.equippedWeapon;
+        if (equipped && weaponStats[equipped] && (equipped === 'energy_blaster' || equipped === 'plasma_rifle')) {
+            const gunData = gameState.gunAmmo[equipped];
+            const ammoType = weaponStats[equipped].ammoType;
+            const reserveAmmo = inventory[ammoType] || 0;
+            if (gunData) {
+                 ammoTextContent = `${gunData.magazine} / ${reserveAmmo}`;
+            }
+             if (gameState.isReloading) {
+                ammoTextContent = 'Reloading...';
+            }
+        }
+        ammoCount.textContent = ammoTextContent;
+    }
 }
 
 // ### Initialization
@@ -2611,6 +2726,9 @@ function init() {
     inventory.energy_cell = 50;
     inventory.plasma_cell = 100;
     inventory.campfire = 1; // Start with a campfire
+    inventory.wood = 10; // Start with some wood
+    inventory.plasma_rifle = 1; // Start with a plasma rifle
+    inventory.energy_blaster = 1; // Start with an energy blaster
 
     Promise.all([
         loadGLTFModel('alien_crystal.glb', 'alien_crystal'),
@@ -2667,15 +2785,27 @@ function init() {
     });
 }
 
-init();
+window.gameState = gameState;
+window.inventory = inventory;
+window.recipes = recipes; // Expose recipes if needed by crafting shim
+window.quests = quests; // Expose quests if needed by quest shim
+window.shopItems = shopItems; // Expose shopItems if needed by shop shim
+window.weaponStats = weaponStats; // Expose weaponStats if needed by ammo display/shims
+window.feedbackQueue = feedbackQueue; // Expose if needed by feedback shim
+window.isFeedbackShowing = isFeedbackShowing; // Expose if needed by feedback shim
+window.feedbackTimeoutId = feedbackTimeoutId; // Expose if needed by feedback shim
+window.FEEDBACK_MESSAGE_DURATION = FEEDBACK_MESSAGE_DURATION; // Expose if needed by feedback shim
 
-// ### Exposed Functions for HTML
+// --- Exposed Functions for HTML (Make sure these are still here) ---
 window.equipWeapon = equipWeapon;
 window.unequipWeapon = unequipWeapon;
 window.craftItem = craftItem;
 window.useItem = useItem;
 window.placeCampfire = placeCampfire;
-window.purchaseItem = purchaseItem; // Expose purchaseItem to HTML
+window.purchaseItem = purchaseItem;
+
+// Make sure init() is called at the end
+init();
 
 // Window Resize Handler
 window.addEventListener('resize', () => {

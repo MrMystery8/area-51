@@ -1,87 +1,360 @@
+/* --- Global Styles & Variables --- */
+:root {
+    --hud-bg-color: rgba(15, 23, 42, 0.75); /* Dark blue-gray */
+    --panel-bg-color: rgba(30, 41, 59, 0.9);  /* Slightly lighter blue-gray */
+    --text-color: #e2e8f0; /* Light gray-blue */
+    --highlight-color: #60a5fa; /* Light blue */
+    --border-color: rgba(100, 116, 139, 0.5); /* Muted gray-blue */
+    --bar-bg-color: #475569; /* Gray */
+    --health-bar-color: #ef4444; /* Red */
+    --stamina-bar-color: #22c55e; /* Green */
+    --hunger-bar-color: #f97316; /* Orange */
+    --thirst-bar-color: #3b82f6; /* Blue */
+    --coin-color: #facc15; /* Yellow */
+    --button-bg: #3b82f6;
+    --button-hover-bg: #60a5fa;
+    --button-disabled-bg: #64748b;
+    --button-text: #ffffff;
+    --font-family: 'Roboto', sans-serif;
+    --border-radius-sm: 4px;
+    --border-radius-md: 8px;
+    --padding-sm: 8px;
+    --padding-md: 16px;
+    --padding-lg: 24px;
+}
+
 body {
     margin: 0;
     overflow: hidden;
-}
-
-#game-container {
-    position: relative;
+    font-family: var(--font-family);
+    background-color: #000; /* Fallback background */
+    color: var(--text-color);
 }
 
 #game-canvas {
+    display: block; /* Remove potential extra space below canvas */
     width: 100vw;
     height: 100vh;
 }
 
+button {
+    background-color: var(--button-bg);
+    color: var(--button-text);
+    border: none;
+    padding: 6px 12px;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    font-family: var(--font-family);
+    font-size: 0.9em;
+    transition: background-color 0.2s ease;
+}
+
+button:hover {
+    background-color: var(--button-hover-bg);
+}
+
+button:disabled {
+    background-color: var(--button-disabled-bg);
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+h2 {
+    margin-top: 0;
+    margin-bottom: var(--padding-md);
+    color: var(--highlight-color);
+    font-weight: 700;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: var(--padding-sm);
+}
+
+/* --- HUD Styles --- */
 #hud {
     position: absolute;
-    top: 10px;
-    left: 10px;
-    color: white;
-    background: rgba(0, 0, 0, 0.5);
-    padding: 10px;
-    border-radius: 5px;
+    top: var(--padding-md);
+    left: var(--padding-md);
+    background-color: var(--hud-bg-color);
+    padding: var(--padding-sm) var(--padding-md);
+    border-radius: var(--border-radius-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--padding-sm);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    width: 250px; /* Fixed width for consistency */
+    font-size: 0.9em;
 }
 
+.hud-stat-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.hud-stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.hud-label {
+    width: 30px; /* Fixed width for labels */
+    font-weight: 700;
+    color: var(--highlight-color);
+    text-align: right;
+}
+
+.stat-bar-container {
+    flex-grow: 1;
+    height: 12px;
+    background-color: var(--bar-bg-color);
+    border-radius: var(--border-radius-sm);
+    overflow: hidden; /* Clip the inner bar */
+    border: 1px solid rgba(0,0,0,0.3);
+}
+
+.stat-bar {
+    height: 100%;
+    border-radius: var(--border-radius-sm); /* Match container */
+    transition: width 0.3s ease-out; /* Smooth transition */
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+}
+
+#health-bar { background-color: var(--health-bar-color); }
+#stamina-bar { background-color: var(--stamina-bar-color); }
+#hunger-bar { background-color: var(--hunger-bar-color); }
+#thirst-bar { background-color: var(--thirst-bar-color); }
+
+.hud-value {
+    min-width: 50px; /* Ensure space for text like 100/100 */
+    text-align: right;
+    font-weight: 700;
+}
+
+.hud-coins, .hud-ammo {
+    margin-top: var(--padding-sm);
+    padding-top: var(--padding-sm);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 700;
+}
+
+.coin-icon, .coin-icon-small {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    background-color: var(--coin-color);
+    border-radius: 50%;
+    border: 1px solid darken(var(--coin-color), 15%);
+    box-shadow: inset 0 0 2px rgba(0,0,0,0.3);
+}
+.coin-icon-small {
+    width: 10px;
+    height: 10px;
+}
+
+#coin-amount {
+    color: var(--coin-color);
+}
+
+#ammo-count {
+    color: var(--highlight-color);
+}
+
+/* --- Minimap Styles --- */
+#minimap {
+    position: absolute;
+    right: var(--padding-md);
+    bottom: var(--padding-md);
+    width: 200px; /* Match MINIMAP_SIZE from JS */
+    height: 200px; /* Match MINIMAP_SIZE from JS */
+    border: 2px solid var(--border-color);
+    background-color: rgba(30, 41, 59, 0.85); /* Match panel bg */
+    border-radius: var(--border-radius-md); /* Rounded corners */
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* --- UI Panel Styles (Inventory, Crafting, Quests, Shop) --- */
+.ui-panel {
+    position: absolute;
+    background: var(--panel-bg-color);
+    color: var(--text-color);
+    padding: var(--padding-lg);
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    display: none; /* Hidden by default */
+    max-height: 70vh; /* Limit height */
+    overflow-y: auto; /* Add scrollbar if needed */
+    overflow-x: hidden;
+    width: 90%; /* Responsive width */
+    max-width: 500px; /* Max width */
+    z-index: 10; /* Ensure panels are above HUD/Minimap */
+}
+
+/* Custom scrollbar for panels */
+.ui-panel::-webkit-scrollbar {
+    width: 8px;
+}
+.ui-panel::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.2);
+    border-radius: var(--border-radius-md);
+}
+.ui-panel::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: var(--border-radius-md);
+    border: 2px solid transparent; /* Creates padding around thumb */
+    background-clip: content-box;
+}
+.ui-panel::-webkit-scrollbar-thumb:hover {
+    background-color: var(--highlight-color);
+}
+
+
+/* Positioning */
+#inventory { top: 50px; right: var(--padding-md); transform: none; }
+#crafting { bottom: 50px; right: var(--padding-md); transform: none; }
+#quests { bottom: 50px; left: var(--padding-md); transform: none; }
+#shop { top: 50%; left: 50%; transform: translate(-50%, -50%); } /* Keep shop centered */
+
+.panel-content {
+    display: flex;
+    flex-direction: column; /* Stack items vertically */
+    gap: var(--padding-sm);
+}
+
+.item, .recipe, .shop-item, .quest {
+    background: rgba(15, 23, 42, 0.6); /* Darker item background */
+    padding: var(--padding-sm) var(--padding-md);
+    border-radius: var(--border-radius-sm);
+    border: 1px solid transparent; /* Placeholder for potential hover effect */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap; /* Allow wrapping on small screens */
+    gap: var(--padding-sm);
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.item:hover, .recipe:hover, .shop-item:hover, .quest:hover {
+   border-color: var(--highlight-color);
+   background-color: rgba(51, 65, 85, 0.7); /* Slightly lighter on hover */
+}
+
+.item-name, .recipe-name {
+    font-weight: 700;
+    text-transform: capitalize;
+    flex-basis: 50%; /* Give name more space */
+    min-width: 100px;
+}
+.item-qty {
+    color: var(--highlight-color);
+    font-weight: bold;
+}
+
+.item-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.recipe-ingredients {
+    font-size: 0.85em;
+    color: #94a3b8; /* Lighter gray for ingredients */
+    margin: 4px 0;
+    flex-basis: 100%; /* Take full width below name */
+}
+
+.recipe.available button { background: #16a34a; } /* Green */
+.recipe.available button:hover { background: #22c55e; }
+.recipe.unavailable button { background: var(--button-disabled-bg); }
+
+.shop-item.available button { background: var(--button-bg); }
+.shop-item.available button:hover { background: var(--button-hover-bg); }
+.shop-item.unavailable button { background: var(--button-disabled-bg); }
+.shop-item .item-details {
+    font-size: 0.9em;
+    color: #cbd5e1;
+}
+
+.quest.completed {
+    opacity: 0.7;
+    background-color: rgba(15, 23, 42, 0.4);
+}
+.quest-objective {
+    margin: 0;
+}
+.quest-status {
+    font-style: italic;
+    color: #64748b; /* Muted gray */
+}
+
+.close-button {
+    position: absolute;
+    top: var(--padding-sm);
+    right: var(--padding-sm);
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    font-size: 1.2em;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 4px 8px;
+    line-height: 1;
+}
+.close-button:hover {
+    color: var(--highlight-color);
+}
+
+
+/* --- Feedback Message --- */
 #feedback {
     position: absolute;
-    top: 10px;
+    bottom: var(--padding-lg); /* Position at bottom center */
     left: 50%;
     transform: translateX(-50%);
-    color: white;
-    background: rgba(0, 0, 0, 0.8);
-    padding: 10px;
-    border-radius: 5px;
-}
-
-#inventory, #crafting, #quests {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.8);
-    color: white;
-    padding: 20px;
-    border-radius: 10px;
-    max-width: 600px;
-    width: 80%;
-}
-
-#inventory-items, #crafting-recipes, #quest-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.item, .recipe, .quest {
-    background: #333;
-    padding: 10px;
-    border-radius: 5px;
-    cursor: pointer;
-}
-
-.recipe.available {
-    background: #0a0;
-}
-
-.recipe.unavailable {
-    background: #a00;
-}
-
-#loading {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: white;
-    font-size: 24px;
+    background: rgba(15, 23, 42, 0.9); /* Consistent dark background */
+    color: var(--highlight-color); /* Use highlight color for feedback */
+    padding: var(--padding-sm) var(--padding-md);
+    border-radius: var(--border-radius-sm);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    display: none; /* Hidden by default */
+    font-size: 0.95em;
+    font-weight: 700;
     text-align: center;
+    z-index: 20; /* Above other UI */
+    opacity: 0; /* Start transparent for fade effect */
+    transition: opacity 0.3s ease-in-out;
 }
 
-.stats {
-    position: fixed;
+/* --- Red Damage Pulse --- */
+#red-pulse {
+    position: absolute;
     top: 0;
-    right: 0;
-    color: white;
-    background: rgba(0,0,0,0.5);
-    padding: 10px;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 0, 0, 0.4); /* Red with transparency */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease-out; /* Faster fade out */
+    z-index: 5; /* Below UI panels but above game */
+}
+
+/* --- Crosshair --- */
+#crosshair {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px; /* Smaller dot */
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.8); /* White dot */
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.5); /* Subtle border */
+    pointer-events: none;
+    display: none; /* Hidden by default */
+    z-index: 5;
 }
