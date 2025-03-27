@@ -43,8 +43,10 @@ const BUILDING_SPAWN_CHANCE = 0.2;
 const CHEST_SPAWN_CHANCE = 0.5;
 const DOOR_INTERACTION_DISTANCE = 5;
 const LOOT_SPAWN_OFFSET = 0.5; // Offset from ground for spawned loot
-const LOOT_SPREAD_RADIUS = 1.0; // Radius to spread multiple loot items
+const LOOT_SPREAD_RADIUS = 1.5; // Increased radius slightly for chest loot spread
 const RESOURCE_COLLECTION_DISTANCE = 3; // Define collection distance
+const FEEDBACK_MESSAGE_DURATION = 1000; // Duration each feedback message shows (ms)
+const CHEST_OPEN_COLLECTION_COOLDOWN = 0.5; // Seconds cooldown after opening chest
 
 // ### Weapon Stats
 const weaponStats = {
@@ -102,6 +104,7 @@ function getTerrainHeight(x, z) {
 }
 
 // ### Game State
+let resourceCollectionCooldownUntil = 0; // Timestamp until resource collection is allowed again
 const gameState = {
     health: 100,
     maxHealth: 100,
@@ -428,7 +431,10 @@ const itemModelMap = {
     alien_vine: 'alien_vine',
     meat: 'meat',
     alien_fruit: 'alien_fruit',
-    gold_coin: 'gold_coin' // Use the actual gold_coin model name
+    gold_coin: 'gold_coin', // Use the actual gold_coin model name
+    // Add other potential loot items here if they have models
+    energy_cell: 'metal', // Example: use metal scrap model for energy cell loot
+    plasma_cell: 'alien_crystal' // Example: use crystal model for plasma cell loot
 };
 
 function loadGLTFModel(url, name) {
@@ -478,10 +484,8 @@ function handleKeyDown(e) {
     }
 }
 
-// REVERTED handleKeyUp: Only sets the key state to false.
 function handleKeyUp(e) {
     keys[e.key.toLowerCase()] = false;
-    // Interaction checks are now called in the animate loop based on keys.e state
 }
 
 function togglePauseMenu() {
@@ -716,9 +720,9 @@ function toggleAimMode() {
             cameraPivot.add(camera);
         }
     } else if (gameState.equippedWeapon) {
-        showFeedback("Aim mode only available with guns!");
+        queueFeedback("Aim mode only available with guns!");
     } else {
-        showFeedback("Equip a weapon first!");
+        queueFeedback("Equip a weapon first!");
     }
 }
 
@@ -745,7 +749,7 @@ function barehandedAttack() {
         const distance3D = playerMesh.position.distanceTo(enemy.mesh.position);
         if (distance3D < 8) {
             enemy.health -= gameState.attackDamage;
-            showFeedback(`Hit ${enemy.type}! (${enemy.health} HP)`);
+            queueFeedback(`Hit ${enemy.type}! (${enemy.health} HP)`); // Use queueFeedback
             spawnBloodParticles(enemy.mesh.position);
             if (enemy.health <= 0) defeated.push(enemy);
         }
@@ -766,7 +770,7 @@ function shootProjectile() {
 
     const gunAmmo = gameState.gunAmmo[equippedGun];
     if (gunAmmo.magazine <= 0) {
-        showFeedback("Magazine empty! Reload.");
+        queueFeedback("Magazine empty! Reload."); // Use queueFeedback
         return;
     }
 
@@ -837,7 +841,7 @@ function shootProjectile() {
         const hitEnemy = enemies.find(enemy => enemy.body === otherBody);
         if (hitEnemy) {
             hitEnemy.health -= gameState.attackDamage;
-            showFeedback(`Hit ${hitEnemy.type}! (${hitEnemy.health} HP)`);
+            queueFeedback(`Hit ${hitEnemy.type}! (${hitEnemy.health} HP)`); // Use queueFeedback
             spawnBloodParticles(hitEnemy.mesh.position);
             if (hitEnemy.health <= 0) {
                 const index = enemies.indexOf(hitEnemy);
@@ -941,7 +945,7 @@ function checkMeleeHit() {
         const distance3D = playerMesh.position.distanceTo(enemy.mesh.position);
         if (distance3D < 10) {
             enemy.health -= gameState.attackDamage;
-            showFeedback(`Hit ${enemy.type}! (${enemy.health} HP)`);
+            queueFeedback(`Hit ${enemy.type}! (${enemy.health} HP)`); // Use queueFeedback
             spawnBloodParticles(enemy.mesh.position);
             if (enemy.health <= 0) defeated.push(enemy);
         }
@@ -955,33 +959,34 @@ function checkMeleeHit() {
 // ### Loot Spawning
 function spawnLootItem(itemType, quantity, position) {
     const modelName = itemModelMap[itemType];
+    let lootMesh;
+
     if (!modelName || !models[modelName]) {
-        console.warn(`No model found for loot item type: ${itemType}`);
+        console.warn(`No model found for loot item type: ${itemType}, using fallback.`);
         // Fallback: Spawn a simple sphere if model is missing
         const fallbackGeometry = new THREE.SphereGeometry(0.2);
-        const fallbackMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
-        const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
-        fallbackMesh.position.copy(position);
-        fallbackMesh.position.y += LOOT_SPAWN_OFFSET; // Add offset
-        scene.add(fallbackMesh);
-        resources.push({
-            type: itemType,
-            amount: quantity,
-            mesh: fallbackMesh
-        });
-        return fallbackMesh; // Return the mesh even if it's a fallback
+        // Use different colors for fallback based on type for slight differentiation
+        let fallbackColor = 0xaaaaaa;
+        if (itemType === 'gold_coin') fallbackColor = 0xffd700;
+        else if (itemType === 'meat') fallbackColor = 0x8B4513;
+        const fallbackMaterial = new THREE.MeshStandardMaterial({ color: fallbackColor });
+        lootMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+    } else {
+         lootMesh = models[modelName].clone();
     }
 
-    const lootMesh = models[modelName].clone();
     let scale = 1.0; // Default scale
-
     // Adjust scale for specific items if needed
     if (itemType === 'gold_coin') {
         scale = 0.5; // Make coins smaller
     } else if (itemType === 'meat') {
         scale = 0.8;
-    } else {
+    } else if (['berries', 'stone', 'wood', 'metal_scrap', 'alien_crystal', 'fiber', 'crystal_shard', 'alien_vine', 'alien_fruit'].includes(itemType)) {
         scale = 1.5; // General resource scale
+    } else if (['water_bottle', 'alien_water'].includes(itemType)) {
+        scale = 1.0;
+    } else if (['energy_cell', 'plasma_cell'].includes(itemType)) {
+        scale = 0.7; // Ammo scale
     }
     lootMesh.scale.set(scale, scale, scale);
 
@@ -991,9 +996,10 @@ function spawnLootItem(itemType, quantity, position) {
     lootMesh.receiveShadow = true;
     scene.add(lootMesh);
 
+    // Add to resources array for collection check
     resources.push({
         type: itemType,
-        amount: quantity,
+        amount: quantity, // Store the quantity this mesh represents (usually 1)
         mesh: lootMesh
     });
 
@@ -1012,14 +1018,16 @@ function handleEnemyDefeat(enemy, index) {
     // Spawn meat
     const meatAmount = Math.floor(Math.random() * 2) + 1;
     if (meatAmount > 0) {
-        const meatPos = deathPosition.clone().add(
-            new THREE.Vector3(
-                (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2,
-                0,
-                (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2
-            )
-        );
-        spawnLootItem('meat', meatAmount, meatPos);
+        for(let i = 0; i < meatAmount; i++) {
+             const pos = deathPosition.clone().add(
+                new THREE.Vector3(
+                    (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2,
+                    0,
+                    (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2
+                )
+            );
+            spawnLootItem('meat', 1, pos); // Spawn 1 meat at a time
+        }
     }
 
     // Spawn gold coins
@@ -1049,18 +1057,18 @@ function initiateReload() {
 
     const gunAmmo = gameState.gunAmmo[equippedGun];
     if (gunAmmo.magazine >= weaponStats[equippedGun].magazineSize) {
-        showFeedback("Magazine is full.");
+        queueFeedback("Magazine is full."); // Use queueFeedback
         return;
     }
     const ammoType = weaponStats[equippedGun].ammoType;
     if (inventory[ammoType] <= 0) {
-        showFeedback("No ammo left to reload.");
+        queueFeedback("No ammo left to reload."); // Use queueFeedback
         return;
     }
 
     gameState.isReloading = true;
     gameState.reloadStartTime = clock.elapsedTime;
-    showFeedback("Reloading...");
+    queueFeedback("Reloading..."); // Use queueFeedback
 }
 
 function updateReload(deltaTime) {
@@ -1074,10 +1082,10 @@ function updateReload(deltaTime) {
                 inventory[ammoType]--;
                 gunAmmo.magazine = weaponStats[equippedGun].magazineSize;
                 gameState.isReloading = false;
-                showFeedback("Reloaded!");
+                queueFeedback("Reloaded!"); // Use queueFeedback
                 updateInventoryUI();
             } else {
-                showFeedback("No ammo left to reload.");
+                queueFeedback("No ammo left to reload."); // Use queueFeedback
                 gameState.isReloading = false;
             }
         }
@@ -1101,11 +1109,11 @@ function craftItem(item) {
     if (Object.keys(recipe).every(res => inventory[res] >= recipe[res])) {
         Object.entries(recipe).forEach(([res, qty]) => inventory[res] -= qty);
         inventory[item]++;
-        showFeedback(`Crafted ${item}!`);
+        queueFeedback(`Crafted ${item}!`); // Use queueFeedback
         updateInventoryUI();
         updateCraftingUI();
     } else {
-        showFeedback("Not enough resources!");
+        queueFeedback("Not enough resources!"); // Use queueFeedback
     }
 }
 
@@ -1161,11 +1169,11 @@ function placeCampfire() {
         gameState.campfirePosition.copy(playerPos);
         inventory.campfire--;
         updateInventoryUI();
-        showFeedback("Campfire placed!");
+        queueFeedback("Campfire placed!"); // Use queueFeedback
     } else if (gameState.campfirePlaced) {
-        showFeedback("You already have a campfire placed.");
+        queueFeedback("You already have a campfire placed."); // Use queueFeedback
     } else {
-        showFeedback("You don't have a campfire to place.");
+        queueFeedback("You don't have a campfire to place."); // Use queueFeedback
     }
 }
 
@@ -1181,7 +1189,7 @@ const weaponOffsets = {
 
 function equipWeapon(weapon) {
     if (gameState.isAiming) {
-        showFeedback("Cannot switch weapons while aiming!");
+        queueFeedback("Cannot switch weapons while aiming!"); // Use queueFeedback
         return;
     }
     if (gameState.equippedWeapon && gameState.equippedWeapon !== weapon) {
@@ -1191,7 +1199,7 @@ function equipWeapon(weapon) {
             scene.remove(equippedWeaponMesh);
             equippedWeaponMesh = null;
         }
-        showFeedback(`Returned ${gameState.equippedWeapon} to inventory.`);
+        queueFeedback(`Returned ${gameState.equippedWeapon} to inventory.`); // Use queueFeedback
     }
 
     if (inventory[weapon] > 0) {
@@ -1200,7 +1208,7 @@ function equipWeapon(weapon) {
         updateInventoryUI();
 
         gameState.attackDamage = weaponStats[weapon].damage;
-        showFeedback(`Equipped ${weapon}!`);
+        queueFeedback(`Equipped ${weapon}!`); // Use queueFeedback
 
         if (equippedWeaponMesh) {
             playerMesh.remove(equippedWeaponMesh);
@@ -1231,20 +1239,20 @@ function equipWeapon(weapon) {
             console.warn(`No model found for ${modelName}, weapon won't be visible.`);
         }
     } else {
-        showFeedback(`No ${weapon} in inventory to equip!`);
+        queueFeedback(`No ${weapon} in inventory to equip!`); // Use queueFeedback
     }
 }
 
 function unequipWeapon() {
     if (gameState.isAiming) {
-        showFeedback("Cannot unequip weapon while aiming!");
+        queueFeedback("Cannot unequip weapon while aiming!"); // Use queueFeedback
         return;
     }
     if (gameState.equippedWeapon) {
         inventory[gameState.equippedWeapon] += 1;
         gameState.equippedWeapon = null;
         gameState.attackDamage = 10;
-        showFeedback("Unequipped weapon!");
+        queueFeedback("Unequipped weapon!"); // Use queueFeedback
         if (equippedWeaponMesh) {
             playerMesh.remove(equippedWeaponMesh);
             scene.remove(equippedWeaponMesh);
@@ -1252,7 +1260,7 @@ function unequipWeapon() {
         }
         updateInventoryUI();
     } else {
-        showFeedback("No weapon equipped to unequip!");
+        queueFeedback("No weapon equipped to unequip!"); // Use queueFeedback
     }
 }
 
@@ -1263,7 +1271,7 @@ function useItem(item) {
         'water_bottle': () => { gameState.thirst = Math.min(100, gameState.thirst + 30); inventory.water_bottle--; },
         'alien_water': () => { gameState.thirst = Math.min(100, gameState.thirst + 50); inventory.alien_water--; },
         'meat': () => { gameState.hunger = Math.min(100, gameState.hunger + 30); inventory.meat--; },
-        'gold_coin': () => { showFeedback("It's a shiny gold coin! Use 'L' to open the shop."); } // Updated feedback
+        'gold_coin': () => { queueFeedback("It's a shiny gold coin! Use 'L' to open the shop."); } // Use queueFeedback
     };
 
     if (itemEffects[item]) {
@@ -1308,13 +1316,13 @@ function purchaseItem(itemName) {
             itemDetails.stock--;
             updateInventoryUI();
             updateShopUI();
-            showFeedback(`Purchased ${itemName}!`);
+            queueFeedback(`Purchased ${itemName}!`); // Use queueFeedback
             checkQuests(); // Check quests after purchase
         } else {
-            showFeedback(`${itemName} is out of stock!`);
+            queueFeedback(`${itemName} is out of stock!`); // Use queueFeedback
         }
     } else {
-        showFeedback("Not enough gold coins!");
+        queueFeedback("Not enough gold coins!"); // Use queueFeedback
     }
 }
 
@@ -1353,7 +1361,7 @@ function completeQuest(quest) {
         case "laser_sword": inventory.laser_sword += 1; break; // Example coin reward
         case "gold_coins_reward": inventory.gold_coin += 50; break; // Example coin reward
     }
-    showFeedback(`Quest Complete: ${quest.objective}`);
+    queueFeedback(`Quest Complete: ${quest.objective}`); // Use queueFeedback
     updateQuestUI();
 }
 
@@ -1595,7 +1603,7 @@ function applyDamageToPlayer(damage) {
     if (gameState.health <= 0) {
         // Handle player death - for now, just reset health
         gameState.health = gameState.maxHealth;
-        showFeedback("You died! Respawning...");
+        queueFeedback("You died! Respawning..."); // Use queueFeedback
         // Potentially move player back to spawn point
         playerBody.position.set(0, getHeight(0,0) + 2, 0);
         playerBody.velocity.set(0,0,0);
@@ -1689,50 +1697,57 @@ function spawnResource() {
     const z = (Math.random() - 0.5) * TERRAIN_SIZE;
     const y = getHeight(x, z) + RESOURCE_HEIGHT_OFFSET;
 
-    let resourceMesh;
-    let modelNameToLoad = selectedType.modelName;
+    // Spawn resource mesh (representing 1 unit initially)
+    const spawnedMesh = spawnLootItem(selectedType.type, 1, new THREE.Vector3(x, y, z));
 
-    if (models[modelNameToLoad]) {
-        resourceMesh = models[modelNameToLoad].clone();
-        resourceMesh.scale.set(2, 2, 2);
-    } else {
-        resourceMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(0.3),
-            new THREE.MeshStandardMaterial({ color: 0xffffff })
-        );
-        console.warn(`Using fallback mesh for resource: ${selectedType.type}`);
+    // Find the just added resource and set its pickup amount
+    const addedResource = resources.find(r => r.mesh === spawnedMesh);
+    if(addedResource) {
+        addedResource.amount = Math.floor(Math.random() * 3) + 1; // Set the pickup amount
     }
-    resourceMesh.position.set(x, y, z);
-    resourceMesh.castShadow = true;
-    resourceMesh.receiveShadow = true;
-    scene.add(resourceMesh);
-
-    resources.push({
-        type: selectedType.type,
-        amount: Math.floor(Math.random() * 3) + 1,
-        mesh: resourceMesh
-    });
 }
 
-// REVERTED: Put 'if (keys.e)' check back inside
+// MODIFIED: Added cooldown check
 function checkResourceCollection() {
-    if (keys.e && playerMesh) { // Check if key is pressed and player exists
+    // Check cooldown first
+    if (clock.elapsedTime < resourceCollectionCooldownUntil) {
+        return;
+    }
+
+    if (keys.e && playerMesh) {
+        const collectedInPress = new Map(); // Map<itemType, totalAmount>
+
         // Iterate backwards to allow safe removal
         for (let i = resources.length - 1; i >= 0; i--) {
             const resource = resources[i];
-            if (!resource || !resource.mesh) continue; // Skip if resource or mesh is invalid
+            if (!resource || !resource.mesh) continue;
 
             const distance = playerMesh.position.distanceTo(resource.mesh.position);
-            if (distance < RESOURCE_COLLECTION_DISTANCE) { // Use defined constant
-                inventory[resource.type] = (inventory[resource.type] || 0) + resource.amount; // Safely add to inventory
+            if (distance < RESOURCE_COLLECTION_DISTANCE) {
+                const currentAmount = collectedInPress.get(resource.type) || 0;
+                collectedInPress.set(resource.type, currentAmount + resource.amount);
+
+                // Remove the visual resource from the world
                 scene.remove(resource.mesh);
-                resources.splice(i, 1); // Remove from array
-                showFeedback(`Collected ${resource.amount} ${resource.type}!`);
-                checkQuests();
-                updateInventoryUI();
-                // Consider breaking after one collection per key press if desired
-                // break;
+                resources.splice(i, 1);
             }
+        }
+
+        // If anything was collected in this press
+        if (collectedInPress.size > 0) {
+            // Update inventory
+            collectedInPress.forEach((amount, type) => {
+                inventory[type] = (inventory[type] || 0) + amount;
+            });
+
+            // Update UI and Quests
+            updateInventoryUI();
+            checkQuests();
+
+            // Generate and queue feedback messages
+            collectedInPress.forEach((amount, type) => {
+                queueFeedback(`Collected ${amount} ${type}!`);
+            });
         }
     }
 }
@@ -1791,21 +1806,20 @@ function spawnNPC() {
     });
 }
 
-// REVERTED: Put 'if (keys.e)' check back inside
 function checkNPCInteraction() {
-    if (keys.e && playerMesh) { // Check if key is pressed and player exists
+    if (keys.e && playerMesh) {
         npcs.forEach(npc => {
             if (!npc || !npc.mesh) return;
             const distance = playerMesh.position.distanceTo(npc.mesh.position);
-            if (distance < 3 && npc.quests.length > 0) { // Interaction distance for NPC
+            if (distance < 3 && npc.quests.length > 0) {
                 const quest = npc.quests[0];
                 if (!quests.some(existingQuest => existingQuest.id === quest.id)) {
                     quests.push(quest);
-                    showFeedback(`New Quest from NPC: ${quest.objective}`);
+                    queueFeedback(`New Quest from NPC: ${quest.objective}`); // Use queueFeedback
                     npc.quests.shift();
                     updateQuestUI();
                     // Consider breaking after one interaction per key press if desired
-                    // return; // (if using forEach, return acts like continue)
+                     // return; // (if using forEach, return acts like continue)
                 }
             }
         });
@@ -2162,9 +2176,8 @@ function createChest(building) {
     }
 }
 
-// REVERTED: Put 'if (keys.e)' check back inside
 function checkChestInteraction() {
-    if (keys.e && playerMesh) { // Check if key is pressed and player exists
+    if (keys.e && playerMesh) {
         buildings.forEach(building => {
             if (building.chest && building.chest.userData.isOpenable) {
                 // Calculate world position of the chest
@@ -2183,6 +2196,7 @@ function checkChestInteraction() {
     }
 }
 
+// MODIFIED: openChest sets cooldown and ensures spread
 function openChest(chest) {
     if (!chest.userData.isOpen) {
         // Animate opening (rotate the lid)
@@ -2193,27 +2207,34 @@ function openChest(chest) {
         }
         chest.userData.isOpen = true;
         chest.userData.isOpenable = false; // Can only open once
-        showFeedback("Chest opened!");
+        queueFeedback("Chest opened!"); // Use queueFeedback
+
+        // --- Activate Collection Cooldown ---
+        resourceCollectionCooldownUntil = clock.elapsedTime + CHEST_OPEN_COLLECTION_COOLDOWN;
+        // ---
 
         const loot = generateChestLoot();
         const chestWorldPosition = new THREE.Vector3();
         chest.getWorldPosition(chestWorldPosition);
-        chestWorldPosition.y = getTerrainHeight(chestWorldPosition.x, chestWorldPosition.z); // Base position on ground
+        // Use a position slightly above the chest's base for spawning, adjusted by terrain height
+        const spawnBaseY = getTerrainHeight(chestWorldPosition.x, chestWorldPosition.z);
 
-        // Spawn loot items around the chest
+        // Spawn ALL loot items physically around the chest
         Object.entries(loot).forEach(([item, quantity]) => {
-            // Spawn individual items if quantity > 1 for visual effect
+            // Spawn individual items for visual effect
             for (let i = 0; i < quantity; i++) {
                  const lootPos = chestWorldPosition.clone().add(
                     new THREE.Vector3(
-                        (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2,
-                        0,
-                        (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2
+                        (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2, // Use radius for spread
+                        0, // Spawn relative to chest's base Y
+                        (Math.random() - 0.5) * LOOT_SPREAD_RADIUS * 2  // Use radius for spread
                     )
                 );
-                spawnLootItem(item, 1, lootPos); // Spawn 1 item at a time
+                lootPos.y = spawnBaseY; // Set Y to ground height before spawnLootItem adds offset
+                spawnLootItem(item, 1, lootPos); // Spawn 1 item/coin at a time
             }
         });
+        // **CRITICAL:** No inventory modification happens in this function.
     }
 }
 
@@ -2240,19 +2261,47 @@ function generateChestLoot() {
 }
 
 
-// ### UI System
-function showFeedback(message) {
-    const feedbackDiv = document.getElementById('feedback');
-    if (!feedbackDiv) return;
-    feedbackDiv.textContent = message;
-    feedbackDiv.style.display = 'block';
-    // Clear previous timeout if exists
-    if (feedbackDiv.timeoutId) clearTimeout(feedbackDiv.timeoutId);
-    feedbackDiv.timeoutId = setTimeout(() => {
-        feedbackDiv.style.display = 'none';
-        feedbackDiv.timeoutId = null;
-    }, 2000);
+// ### UI System - Feedback Queue Implementation
+const feedbackQueue = [];
+let isFeedbackShowing = false;
+let feedbackTimeoutId = null; // Store the timeout ID
+
+function queueFeedback(message) {
+    feedbackQueue.push(message);
+    processFeedbackQueue();
 }
+
+function processFeedbackQueue() {
+    if (isFeedbackShowing || feedbackQueue.length === 0) {
+        return;
+    }
+
+    isFeedbackShowing = true;
+    const message = feedbackQueue.shift();
+    const feedbackDiv = document.getElementById('feedback');
+
+    if (feedbackDiv) {
+        feedbackDiv.textContent = message;
+        feedbackDiv.style.display = 'block';
+
+        // Clear any existing timeout before setting a new one
+        if (feedbackTimeoutId) {
+            clearTimeout(feedbackTimeoutId);
+        }
+
+        feedbackTimeoutId = setTimeout(() => {
+            feedbackDiv.style.display = 'none';
+            isFeedbackShowing = false;
+            feedbackTimeoutId = null; // Clear the stored ID
+            processFeedbackQueue(); // Process the next message
+        }, FEEDBACK_MESSAGE_DURATION);
+    } else {
+        // If feedbackDiv doesn't exist, skip this message and try the next
+        isFeedbackShowing = false;
+        processFeedbackQueue();
+    }
+}
+
 
 function toggleInventory() {
     gameState.inventoryOpen = !gameState.inventoryOpen;
@@ -2316,8 +2365,8 @@ function updateMinimap() {
     drawMinimapEntity(playerMesh, 'blue');
     enemies.forEach(enemy => drawMinimapEntity(enemy.mesh, 'red'));
     buildings.forEach(building => drawMinimapBuilding(building));
-    // Optionally draw resources/loot on minimap
-    // resources.forEach(res => drawMinimapEntity(res.mesh, 'yellow')); // Could be too cluttered
+    // Draw resources/loot on minimap (optional, can be cluttered)
+    // resources.forEach(res => drawMinimapEntity(res.mesh, 'yellow'));
 }
 
 function drawMinimapEntity(entityMesh, color) {
@@ -2367,9 +2416,8 @@ function updatePlayerAttackAnimation() {
 }
 
 // ### Door Interaction
-// REVERTED: Put 'if (keys.e)' check back inside
 function checkDoorInteraction() {
-    if (keys.e && playerMesh) { // Check if key is pressed and player exists
+    if (keys.e && playerMesh) {
         buildings.forEach(building => {
             if (building.door) {
                 const doorWorldPosition = new THREE.Vector3();
@@ -2386,8 +2434,6 @@ function checkDoorInteraction() {
     }
 }
 
-// Note: interactWithDoor itself doesn't need the keys.e check,
-// it's called BY checkDoorInteraction which now has the check.
 function interactWithDoor(building) {
     if (!building.doorPivot || !building.doorBody) return;
     const door = building.door;
@@ -2401,7 +2447,7 @@ function interactWithDoor(building) {
         // Close the door
         building.doorTargetAngle = 0;
         door.userData.isOpen = false;
-        showFeedback("Closing door...");
+        queueFeedback("Closing door..."); // Use queueFeedback
         // Physics body will be added back when animation finishes
     } else {
         // Open the door
@@ -2411,7 +2457,7 @@ function interactWithDoor(building) {
             world.removeBody(building.doorBody);
             building.doorBodyAdded = false;
         }
-        showFeedback("Opening door...");
+        queueFeedback("Opening door..."); // Use queueFeedback
     }
 }
 
@@ -2419,7 +2465,7 @@ function interactWithDoor(building) {
 let clock = new THREE.Clock();
 
 function animate() {
-    const deltaTime = Math.min(clock.getDelta(), 0.1);
+    const deltaTime = Math.min(clock.getDelta(), 0.1); // Use clock.getDelta() for time
 
     world.step(1 / 60, deltaTime, 3);
     updatePhysics(deltaTime);
@@ -2455,9 +2501,6 @@ function animate() {
                     const hingeWorldPos = new THREE.Vector3();
                     building.doorPivot.getWorldPosition(hingeWorldPos); // Pivot's world pos
                     const doorWidth = building.door.geometry.parameters.width;
-                    const doorDepth = building.door.geometry.parameters.depth;
-
-                    // Center of the door relative to pivot
                     const doorOffsetX = doorWidth / 2;
 
                     // Calculate world position based on pivot and angle
@@ -2501,8 +2544,8 @@ function animate() {
     updatePlayerAttackAnimation();
     const tiltQuaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), targetTiltAngle);
     const targetQuaternion = targetFacingQuaternion.clone().multiply(tiltQuaternion);
-    if(playerMesh) playerMesh.quaternion.slerp(targetQuaternion, 0.2); // Check if playerMesh exists
-    if(playerBody && playerMesh) playerBody.quaternion.copy(playerMesh.quaternion); // Check if playerBody/Mesh exists
+    if(playerMesh) playerMesh.quaternion.slerp(targetQuaternion, 0.2);
+    if(playerBody && playerMesh) playerBody.quaternion.copy(playerMesh.quaternion);
 
     handleCombat(deltaTime);
     updateSurvival(deltaTime);
@@ -2510,7 +2553,7 @@ function animate() {
     updateEnemies(deltaTime);
     updateBloodParticles(deltaTime);
 
-    // REVERTED: Call interaction checks here, they have internal 'if (keys.e)' checks now
+    // Call interaction checks (they have internal 'if (keys.e)' checks)
     checkResourceCollection();
     checkNPCInteraction();
     checkChestInteraction();
