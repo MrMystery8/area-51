@@ -7,6 +7,7 @@
 // 6. Bullet enhancements
 // 7. Torch or light source for houses
 // 8. More quests/ better npc interaction
+// 9. Animal Spawning/Killing for food 
 
 import * as THREE from 'https://cdn.skypack.dev/three@0.128.0';
 import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
