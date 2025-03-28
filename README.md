@@ -1,7 +1,5 @@
 # Area-51: A 3D Web-Based Survival Game
 
-![Gameplay Screenshot Placeholder](placeholder.png)
-*(Suggestion: Replace `placeholder.png` with an actual screenshot or GIF of the game)*
 
 Welcome to Area-51, a challenging 3D survival game set in a mysterious, procedurally generated world teeming with alien life and secrets. Explore, gather resources, craft tools and weapons, build shelter, fight off hostile creatures, and manage your basic needs to survive.
 
@@ -116,4 +114,9 @@ To run this game locally, you need a local web server because browsers restrict 
     *   Collect Gold Coins and press **L** to open the Shop and buy items.
 8.  **Beware the Night:** The world gets darker during the night cycle. Be prepared!
 
-## 📁 File Structure (Simplified)
+
+## 📜 License
+
+*(Specify your license here, e.g., MIT License, or state that it's unlicensed)*
+
+This project is currently unlicensed.
